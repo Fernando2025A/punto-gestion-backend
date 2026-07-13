@@ -9,8 +9,47 @@ datasource db {
 }
 
 model User {
-  id               String @id @default(uuid())
+  id               String     @id @default(uuid())
   username         String?    @unique
 
   password         String
+
+  inventory        Inventory?
+}
+
+model Inventory {
+  id        Int      @id @default(autoincrement())
+
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+
+  products  Product[]
+}
+
+model Product {
+  id          Int      @id @default(autoincrement())
+
+  name        String
+  price       Float
+  stock       Int
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  inventoryId Int
+  inventory   Inventory @relation(fields: [inventoryId], references: [id])
+
+  category    Category
+}
+
+//enum para categorias de productos:
+enum Category {
+  ELECTRONICS
+  CLOTHING
+  FOOD
+  BOOKS
+  FURNITURE
+  TOYS
+  SPORTS
+  OTHERS
 }

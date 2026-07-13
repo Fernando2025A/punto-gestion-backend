@@ -4,28 +4,26 @@ jest.mock('src/prisma/prisma.service', () => ({
   PrismaService: jest.fn(),
 }));
 
-import { AuthController } from './auth.controller';
-import { AuthService } from './auth.service';
+import { ProductsController } from './products.controller';
+import { ProductsService } from './products.service';
 
-describe('AuthController', () => {
-  let controller: AuthController;
+describe('ProductsController', () => {
+  let controller: ProductsController;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      controllers: [AuthController],
+      controllers: [ProductsController],
       providers: [
         {
-          provide: AuthService,
+          provide: ProductsService,
           useValue: {
-            createUser: jest.fn(),
-            validateUser: jest.fn(),
-            login: jest.fn(),
+            create: jest.fn(),
           },
         },
       ],
     }).compile();
 
-    controller = module.get<AuthController>(AuthController);
+    controller = module.get<ProductsController>(ProductsController);
   });
 
   it('should be defined', () => {
