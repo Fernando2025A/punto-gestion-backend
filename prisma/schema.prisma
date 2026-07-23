@@ -27,19 +27,20 @@ model Inventory {
 }
 
 model Product {
-  id          Int      @id @default(autoincrement())
+  id            Int      @id @default(autoincrement())
 
-  name        String
-  price       Float
-  stock       Int
+  name          String
+  price         Float
+  purchasePrice Float?
+  stock         Int
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  inventoryId Int
-  inventory   Inventory @relation(fields: [inventoryId], references: [id])
+  inventoryId   Int
+  inventory     Inventory @relation(fields: [inventoryId], references: [id])
 
-  category    Category
+  category      Category
 }
 
 //enum para categorias de productos:

@@ -12,6 +12,10 @@ export class CreateProductDto {
 
   @IsNumber()
   @Min(0)
+  purchasePrice: number;
+
+  @IsNumber()
+  @Min(0)
   stock: number;
 
   @IsEnum(Category)
