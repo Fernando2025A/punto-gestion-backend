@@ -15,6 +15,8 @@ import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import type { JwtPayload } from 'src/auth/jwt-payload.interface';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { FindProductsDto } from './dto/find-products.dto';
+import { StockEntryDto } from 'src/movements/dto/stock-entry.dto';
+import { StockExitDto } from 'src/movements/dto/stock-exit.dto';
 
 @Controller('products')
 export class ProductsController {
@@ -33,6 +35,22 @@ export class ProductsController {
     return this.productsService.findAll(user, paginationDto);
   }
 
+  // 🟢 Entrada de stock (ej: PATCH /products/stock-entry)
+  @Patch('stock-entry')
+  recordStockEntry(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: StockEntryDto,
+  ) {
+    return this.productsService.recordStockEntry(dto, user);
+  }
+
+  // 🔴 Salida de stock (ej: PATCH /products/stock-exit)
+  @Patch('stock-exit')
+  recordStockExit(@CurrentUser() user: JwtPayload, @Body() dto: StockExitDto) {
+    return this.productsService.recordStockExit(dto, user);
+  }
+
+  // ⚠️ Los endpoints con :id deben ir SIEMPRE al final de las rutas del mismo método HTTP
   @Patch(':id')
   update(
     @CurrentUser() user: JwtPayload,

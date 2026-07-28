@@ -15,6 +15,8 @@ model User {
   password         String
 
   inventory        Inventory?
+
+  movements MovementHistory[]
 }
 
 model Inventory {
@@ -24,6 +26,7 @@ model Inventory {
   user      User     @relation(fields: [userId], references: [id])
 
   products  Product[]
+  movements MovementHistory[]
 }
 
 model Product {
@@ -41,6 +44,8 @@ model Product {
   inventory     Inventory @relation(fields: [inventoryId], references: [id])
 
   category      Category
+
+  movements MovementHistory[]
 }
 
 //enum para categorias de productos:
@@ -53,4 +58,40 @@ enum Category {
   TOYS
   SPORTS
   OTHERS
+}
+
+// Nuevo enum para los tipos de acciones
+enum MovementType {
+  CREATE_PRODUCT   // Creación de producto
+  UPDATE_PRODUCT   // Edición general del producto (nombre, precio, categoría)
+  STOCK_ENTRY      // Entrada de stock (compras, ajustes positivos)
+  STOCK_EXIT       // Salida de stock (ventas, mermas, pérdidas)
+  DELETE_PRODUCT   // Eliminación de producto (opcional)
+}
+
+model MovementHistory {
+  id          Int          @id @default(autoincrement())
+  
+  type        MovementType
+  quantity    Int?         // Cantidad ingresada/retirada (aplica para STOCK_ENTRY y STOCK_EXIT)
+  previousStock Int?       // Stock que había ANTES del movimiento
+  newStock     Int?        // Stock que quedó DESPUÉS del movimiento
+  
+  reason      String?      // Razón o nota opcional (ej: "Ajuste de inventario", "Merma", "Venta #102")
+  details     Json?        // Útil para guardar cambios en edicion (ej: { oldPrice: 10, newPrice: 12 })
+
+  createdAt   DateTime     @default(now())
+
+  // Relaciones
+  inventoryId Int
+  inventory   Inventory    @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+
+  // Relación opcional con Product: 
+  // Se deja opcional u omitida por si el producto se elimina en el futuro.
+  productId   Int?
+  product     Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  // Relación con el usuario que ejecutó la acción
+  userId      String?
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
 }
