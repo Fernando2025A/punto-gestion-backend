@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -11,15 +12,18 @@ import { FindProductsDto } from './dto/find-products.dto';
 import { MovementsService } from 'src/movements/movements.service';
 import { StockExitDto } from 'src/movements/dto/stock-exit.dto';
 import { StockEntryDto } from 'src/movements/dto/stock-entry.dto';
+import { SuppliersService } from 'src/suppliers/suppliers.service';
+import { Category } from 'generated/prisma/enums';
 
 @Injectable()
 export class ProductsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly movements: MovementsService,
+    private readonly suppliersService: SuppliersService,
   ) {}
 
-  // Helper privado para asegurar que el usuario tenga un inventario
+  // Helper privado para obtener o crear el inventario del usuario
   private async getOrCreateInventory(userId: string) {
     let inventory = await this.prisma.inventory.findUnique({
       where: { userId },
@@ -104,10 +108,9 @@ export class ProductsService {
 
   // ⚠️ Este update es EXCLUSIVO para metadatos (nombre, precio, categoría)
   async update(dto: UpdateProductDto, user: JwtPayload, productId: number) {
-    // 1. Validamos que el producto exista y pertenezca al usuario
+    // Validar propiedad del producto
     await this.validateProduct(user, productId);
 
-    // 2. Obtenemos el inventario (o lanzamos NotFoundException si no existe)
     const inventory = await this.prisma.inventory.findUnique({
       where: { userId: user.id },
     });
@@ -118,10 +121,22 @@ export class ProductsService {
       );
     }
 
-    // 3. Omitimos 'stock' si viene en el DTO para forzar el uso de /stock-entry o /stock-exit
+    // Si actualizan la categoría a FOOD o cambian fecha de expiración en un alimento
+    if (dto.category === Category.FOOD && dto.expirationDate === null) {
+      throw new BadRequestException(
+        'Un producto de la categoría FOOD debe mantener una fecha de expiración válida',
+      );
+    }
+
+    // Si están cambiando/asignando un nuevo proveedor, lo validamos
+    if (dto.supplierId) {
+      await this.suppliersService.findOne(dto.supplierId, inventory.userId);
+    }
+
+    // Ignoramos el cambio de stock directo si viniera en el DTO
     const { stock, ...cleanDto } = dto as any;
 
-    // 4. Delegamos TODO a MovementsService (obtiene estado previo, actualiza y crea el historial)
+    // Delegamos la actualización e historial a MovementsService
     return await this.movements.recordProductUpdate(
       productId,
       cleanDto,
@@ -132,9 +147,19 @@ export class ProductsService {
 
   async delete(user: JwtPayload, productId: number) {
     await this.validateProduct(user, productId);
-    return await this.prisma.product.delete({
-      where: { id: productId },
+
+    const inventory = await this.prisma.inventory.findUnique({
+      where: { userId: user.id },
     });
+
+    if (!inventory) {
+      throw new NotFoundException(
+        'No se encontró un inventario para este usuario',
+      );
+    }
+
+    // Delegamos la eliminación e historial a MovementsService
+    return await this.movements.deleteProduct(productId, user.id, inventory.id);
   }
 
   private async validateProduct(user: JwtPayload, productId: number) {

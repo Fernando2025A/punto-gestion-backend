@@ -20,32 +20,51 @@ model User {
 }
 
 model Inventory {
-  id        Int      @id @default(autoincrement())
-
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id])
-
-  products  Product[]
-  movements MovementHistory[]
+  id         Int               @id @default(autoincrement())
+  userId     String            @unique
+  user       User              @relation(fields: [userId], references: [id])
+  products   Product[]
+  movements  MovementHistory[]
+  suppliers  Supplier[]        // 👈 Relación con los proveedores del inventario
 }
 
 model Product {
-  id            Int      @id @default(autoincrement())
-
+  id            Int            @id @default(autoincrement())
   name          String
   price         Float
   purchasePrice Float?
   stock         Int
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  category      Category
+  expirationDate DateTime?     // 👈 Opcional: obligatorio en la lógica si es "FOOD"
+
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   inventoryId   Int
-  inventory     Inventory @relation(fields: [inventoryId], references: [id])
+  inventory     Inventory      @relation(fields: [inventoryId], references: [id])
 
-  category      Category
+  // Relación Opcional con Supplier
+  supplierId    Int?
+  supplier      Supplier?      @relation(fields: [supplierId], references: [id], onDelete: SetNull)
 
-  movements MovementHistory[]
+  movements     MovementHistory[]
+}
+
+model Supplier {
+  id          Int       @id @default(autoincrement())
+  name        String
+  contact     String?   // Teléfono, email o contacto principal
+  
+  inventoryId Int
+  inventory   Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  
+  products    Product[] // Un proveedor puede tener muchos productos
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([name, inventoryId]) // Evita proveedores duplicados en el mismo inventario
 }
 
 //enum para categorias de productos:

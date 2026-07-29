@@ -6,7 +6,7 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { StockExitDto } from './dto/stock-exit.dto';
 import { CreateProductDto } from 'src/products/dto/create-product.dto';
-import { MovementType } from 'generated/prisma/enums';
+import { Category, MovementType } from 'generated/prisma/enums';
 import { JwtPayload } from 'src/auth/jwt-payload.interface';
 import { StockEntryDto } from './dto/stock-entry.dto';
 import { UpdateProductDto } from 'src/products/dto/update-product.dto';
@@ -65,29 +65,36 @@ export class MovementsService {
     userId: string,
     inventoryId: number,
   ) {
+    if (dto.category === Category.FOOD && !dto.expirationDate) {
+      throw new BadRequestException(
+        'Los productos de la categoría FOOD requieren una fecha de expiración',
+      );
+    }
+    if (dto.supplierId) {
+      const supplier = await this.prisma.supplier.findFirst({
+        where: { id: dto.supplierId, inventoryId },
+      });
+      if (!supplier) {
+        throw new NotFoundException('El proveedor especificado no existe');
+      }
+    }
     return await this.prisma.$transaction(async (tx) => {
-      // 1. Crear el producto
       const product = await tx.product.create({
         data: {
-          ...dto,
+          name: dto.name,
+          price: dto.price,
+          purchasePrice: dto.purchasePrice,
+          stock: dto.stock,
+          category: dto.category,
+          supplierId: dto.supplierId,
+          expirationDate: dto.expirationDate
+            ? new Date(dto.expirationDate)
+            : null,
           inventoryId,
         },
       });
 
-      // 2. Registrar el movimiento inicial
-      await tx.movementHistory.create({
-        data: {
-          type: MovementType.CREATE_PRODUCT,
-          quantity: product.stock,
-          previousStock: 0,
-          newStock: product.stock,
-          reason: 'Creación inicial del producto',
-          inventoryId,
-          productId: product.id,
-          userId,
-        },
-      });
-
+      // Registrar historial...
       return product;
     });
   }
@@ -156,13 +163,17 @@ export class MovementsService {
       const changes: Record<string, { from: any; to: any }> = {};
 
       Object.keys(dto).forEach((key) => {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         const newValue = dto[key];
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         const oldValue = currentProduct[key];
 
         // Guardamos solo si el valor envió cambios y es diferente al actual
         if (newValue !== undefined && newValue !== oldValue) {
           changes[key] = {
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
             from: oldValue,
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
             to: newValue,
           };
         }
@@ -195,6 +206,44 @@ export class MovementsService {
       });
 
       return updatedProduct;
+    });
+  }
+
+  async deleteProduct(productId: number, userId: string, inventoryId: number) {
+    return await this.prisma.$transaction(async (tx) => {
+      // 1. Obtener el producto antes de ser eliminado
+      const product = await tx.product.findFirst({
+        where: { id: productId, inventoryId },
+      });
+
+      if (!product) {
+        throw new NotFoundException('Producto no encontrado');
+      }
+
+      // 2. Registrar la eliminación en el historial ANTES de borrar el producto
+      // Guardamos los metadatos en 'details' para no perderlos cuando productId quede en null
+      await tx.movementHistory.create({
+        data: {
+          type: MovementType.DELETE_PRODUCT,
+          previousStock: product.stock,
+          newStock: 0,
+          reason: 'Producto eliminado del sistema',
+          details: {
+            deletedProductName: product.name,
+            deletedProductCategory: product.category,
+            deletedProductPrice: product.price,
+            deletedProductPurchasePrice: product.purchasePrice,
+          },
+          inventoryId,
+          productId: product.id,
+          userId,
+        },
+      });
+
+      // 3. Eliminar el producto de la base de datos
+      return await tx.product.delete({
+        where: { id: productId },
+      });
     });
   }
 

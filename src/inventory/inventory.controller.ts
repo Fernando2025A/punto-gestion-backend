@@ -11,4 +11,9 @@ export class InventoryController {
   getResume(@CurrentUser() user: JwtPayload) {
     return this.inventoryService.getResume(user);
   }
+
+  @Get('low-stock')
+  getLowStock(@CurrentUser() user: JwtPayload) {
+    return this.inventoryService.getLowStock(user.id);
+  }
 }
