@@ -12,6 +12,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import type { JwtPayload } from './jwt-payload.interface';
+import { LoggerDto } from './dto/logger.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -26,7 +27,7 @@ export class AuthController {
   @Public()
   @Post('login')
   async login(
-    @Body() dto: CreateUserDto,
+    @Body() dto: LoggerDto,
     @Res({ passthrough: true }) res: Response,
   ) {
     const user = await this.authService.validateUser(
@@ -46,7 +47,11 @@ export class AuthController {
       maxAge: 1000 * 60 * 60 * 24,
     });
 
-    return { message: 'Inicio de sesión correcto', user };
+    return {
+      message: 'Inicio de sesión correcto',
+      access_token: token.access_token,
+      user,
+    };
   }
 
   @Post('logout')

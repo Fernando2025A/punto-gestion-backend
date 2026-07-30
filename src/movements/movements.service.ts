@@ -7,7 +7,6 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { StockExitDto } from './dto/stock-exit.dto';
 import { CreateProductDto } from 'src/products/dto/create-product.dto';
 import { Category, MovementType } from 'generated/prisma/enums';
-import { JwtPayload } from 'src/auth/jwt-payload.interface';
 import { StockEntryDto } from './dto/stock-entry.dto';
 import { UpdateProductDto } from 'src/products/dto/update-product.dto';
 
@@ -289,9 +288,83 @@ export class MovementsService {
     });
   }
 
-  async getMovements(user: JwtPayload) {
+  async getLast7DaysMovementsSummary(userId: string) {
+    // 1. Obtener el inventario del usuario
+    const inventory = await this.prisma.inventory.findUnique({
+      where: { userId },
+    });
+
+    if (!inventory) {
+      throw new NotFoundException('Inventario no encontrado');
+    }
+
+    // 2. Definir el rango de los últimos 7 días
+    const startOf7DaysAgo = new Date();
+    startOf7DaysAgo.setDate(startOf7DaysAgo.getDate() - 6);
+    startOf7DaysAgo.setHours(0, 0, 0, 0);
+
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    // 3. Consultar todos los movimientos del rango (solo id y createdAt para optimizar)
     const movements = await this.prisma.movementHistory.findMany({
-      where: { userId: user.id },
+      where: {
+        inventoryId: inventory.id,
+        createdAt: {
+          gte: startOf7DaysAgo,
+          lte: endOfToday,
+        },
+      },
+      select: {
+        createdAt: true,
+      },
+    });
+
+    // 4. Agrupar por fecha en formato YYYY-MM-DD
+    const summaryMap: Record<string, number> = {};
+
+    // Inicializar los últimos 7 días en 0 por si hay días sin movimientos
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0]; // "2026-07-30"
+      summaryMap[dateStr] = 0;
+    }
+
+    // Contar movimientos por día
+    movements.forEach((movement) => {
+      const dateStr = movement.createdAt.toISOString().split('T')[0];
+      if (summaryMap[dateStr] !== undefined) {
+        summaryMap[dateStr] += 1;
+      }
+    });
+
+    // 5. Convertir el mapa a una lista ordenada de objetos
+    return Object.entries(summaryMap).map(([date, totalMovements]) => ({
+      date,
+      totalMovements,
+    }));
+  }
+
+  async getStockEntry(userId: string) {
+    const movements = await this.prisma.movementHistory.findMany({
+      where: { userId, type: 'STOCK_ENTRY' },
+      orderBy: { createdAt: 'desc' }, // Opcional: para traer los más recientes primero
+    });
+    return movements;
+  }
+
+  async getStockExit(userId: string) {
+    const movements = await this.prisma.movementHistory.findMany({
+      where: { userId, type: 'STOCK_EXIT' },
+      orderBy: { createdAt: 'desc' }, // Opcional: para traer los más recientes primero
+    });
+    return movements;
+  }
+
+  async getMovements(userId: string) {
+    const movements = await this.prisma.movementHistory.findMany({
+      where: { userId },
       orderBy: { createdAt: 'desc' }, // Opcional: para traer los más recientes primero
     });
     return movements;

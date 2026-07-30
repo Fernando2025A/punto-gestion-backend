@@ -1,19 +1,28 @@
 import { Controller, Get } from '@nestjs/common';
 import { MovementsService } from './movements.service';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
-import { type JwtPayload } from 'src/auth/jwt-payload.interface';
 
 @Controller('movements')
 export class MovementsController {
   constructor(private readonly movementsService: MovementsService) {}
 
   @Get()
-  getMovements(@CurrentUser() user: JwtPayload) {
-    return this.movementsService.getMovements(user);
+  getMovements(@CurrentUser('id') userId: string) {
+    return this.movementsService.getMovements(userId);
   }
 
-  @Get('today')
-  getTodayMovements(@CurrentUser() user: JwtPayload) {
-    return this.movementsService.getTodayMovements(user.id);
+  @Get('last7days')
+  getLast7DaysMov(@CurrentUser('id') userId: string) {
+    return this.movementsService.getLast7DaysMovementsSummary(userId);
+  }
+
+  @Get('stock-entry')
+  getStockEntry(@CurrentUser('id') userId: string) {
+    return this.movementsService.getStockEntry(userId);
+  }
+
+  @Get('stock-exit')
+  getStockExit(@CurrentUser('id') userId: string) {
+    return this.movementsService.getStockExit(userId);
   }
 }

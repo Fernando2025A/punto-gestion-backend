@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { JwtPayload } from 'src/auth/jwt-payload.interface';
+import { MovementsService } from 'src/movements/movements.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
 export class InventoryService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly movements: MovementsService,
+  ) {}
 
   async getResume(user: JwtPayload) {
     // 1. Agregamos los datos agrupados filtrando por el inventario del usuario
@@ -40,10 +44,13 @@ export class InventoryService {
       return acc + product.price * product.stock;
     }, 0);
 
+    const todayMovements = await this.movements.getTodayMovements(user.id);
+
     return {
       totalProducts: metrics._count.id,
       totalStock: metrics._sum.stock ?? 0,
       totalValue: totalInventoryValue,
+      todayMovements: todayMovements,
     };
   }
 

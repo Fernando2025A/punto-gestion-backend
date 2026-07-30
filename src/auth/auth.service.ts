@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   UnauthorizedException,
@@ -47,6 +48,10 @@ export class AuthService {
       return null;
     }
 
+    if (!user.password)
+      throw new BadRequestException(
+        'El usuario no tiene contraseña establecida',
+      );
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       return null;
@@ -58,7 +63,7 @@ export class AuthService {
     };
   }
 
-  async login(user: { id: string; username: string | null }) {
+  login(user: { id: string; username: string | null }) {
     const payload = { sub: user.id, username: user.username };
     return {
       access_token: this.jwtService.sign(payload),
