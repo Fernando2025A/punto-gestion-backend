@@ -16,4 +16,9 @@ export class InventoryController {
   getLowStock(@CurrentUser() user: JwtPayload) {
     return this.inventoryService.getLowStock(user.id);
   }
+
+  @Get('categories')
+  getCategories(@CurrentUser() user: JwtPayload) {
+    return this.inventoryService.getCategories(user.id);
+  }
 }

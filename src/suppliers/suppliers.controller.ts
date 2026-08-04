@@ -8,11 +8,13 @@ import {
   Param,
   Delete,
   ParseIntPipe,
+  Query,
 } from '@nestjs/common';
 import { SuppliersService } from './suppliers.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
+import { FindSupplierDto } from './dto/find-supplier.dto';
 
 @Controller('suppliers')
 export class SuppliersController {
@@ -27,8 +29,11 @@ export class SuppliersController {
   }
 
   @Get()
-  findAll(@CurrentUser('id') userId: string) {
-    return this.suppliersService.findAll(userId);
+  findAll(
+    @CurrentUser('id') userId: string,
+    @Query() paginationDto: FindSupplierDto,
+  ) {
+    return this.suppliersService.findAll(userId, paginationDto);
   }
 
   @Get(':id')

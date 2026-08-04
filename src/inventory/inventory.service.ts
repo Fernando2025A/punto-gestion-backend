@@ -65,4 +65,17 @@ export class InventoryService {
     });
     return products;
   }
+
+  async getCategories(userId: string) {
+    const inventory = await this.prisma.inventory.findUnique({
+      where: { userId },
+    });
+    if (!inventory) throw new NotFoundException('No se encontró un inventario');
+    const categories = await this.prisma.product.groupBy({
+      by: ['category'],
+      where: { inventoryId: inventory.id },
+      _count: { category: true },
+    });
+    return categories;
+  }
 }

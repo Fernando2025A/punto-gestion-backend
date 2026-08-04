@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
+import { FindSupplierDto } from './dto/find-supplier.dto';
 
 @Injectable()
 export class SuppliersService {
@@ -56,18 +57,39 @@ export class SuppliersService {
   }
 
   // Listar todos los proveedores del usuario
-  async findAll(userId: string) {
+  async findAll(userId: string, dto: FindSupplierDto) {
     const inventory = await this.getOrCreateInventory(userId);
 
-    return await this.prisma.supplier.findMany({
-      where: { inventoryId: inventory.id },
-      include: {
-        _count: {
-          select: { products: true },
+    const { page, limit } = dto;
+
+    const skip = (page - 1) * limit;
+
+    const [suppliers, total] = await Promise.all([
+      this.prisma.supplier.findMany({
+        where: { inventoryId: inventory.id },
+        include: {
+          _count: {
+            select: { products: true },
+          },
         },
+        orderBy: { name: 'asc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.supplier.count({
+        where: { inventoryId: inventory.id },
+      }),
+    ]);
+
+    return {
+      data: suppliers,
+      pagination: {
+        page,
+        limit,
+        totalItems: total,
+        totalPages: Math.ceil(total / limit),
       },
-      orderBy: { name: 'asc' },
-    });
+    };
   }
 
   // Obtener un proveedor por ID y userId
@@ -98,7 +120,7 @@ export class SuppliersService {
   async update(
     id: number,
     updateSupplierDto: UpdateSupplierDto,
-    userId: string
+    userId: string,
   ) {
     const supplier = await this.findOne(id, userId); // Ya me asegura pertenencia y existencia
 

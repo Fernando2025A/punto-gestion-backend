@@ -9,6 +9,8 @@ import { CreateProductDto } from 'src/products/dto/create-product.dto';
 import { Category, MovementType } from 'generated/prisma/enums';
 import { StockEntryDto } from './dto/stock-entry.dto';
 import { UpdateProductDto } from 'src/products/dto/update-product.dto';
+import { FindMovementsDto } from './dto/find-movements.dto';
+import { FindStockDto } from './dto/find-stock.dto';
 
 @Injectable()
 export class MovementsService {
@@ -97,6 +99,8 @@ export class MovementsService {
         data: {
           type: MovementType.CREATE_PRODUCT,
           productId: product.id,
+          reason: 'Creación inicial de producto',
+          details: `Se añadió un producto de la categoría ${product.category} con un stock inicial de ${product.stock}`,
           inventoryId,
           userId,
         },
@@ -353,27 +357,96 @@ export class MovementsService {
     }));
   }
 
-  async getStockEntry(userId: string) {
-    const movements = await this.prisma.movementHistory.findMany({
-      where: { userId, type: 'STOCK_ENTRY' },
-      orderBy: { createdAt: 'desc' }, // Opcional: para traer los más recientes primero
-    });
-    return movements;
+  async getStockEntry(userId: string, dto: FindStockDto) {
+    const { page, limit } = dto;
+
+    const skip = (page - 1) * limit;
+
+    const [movements, total] = await Promise.all([
+      this.prisma.movementHistory.findMany({
+        where: {
+          userId,
+          type: 'STOCK_ENTRY',
+        },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.movementHistory.count({
+        where: { userId, type: 'STOCK_ENTRY' },
+      }),
+    ]);
+
+    return {
+      data: movements,
+      pagination: {
+        page,
+        limit,
+        totalItems: total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
-  async getStockExit(userId: string) {
-    const movements = await this.prisma.movementHistory.findMany({
-      where: { userId, type: 'STOCK_EXIT' },
-      orderBy: { createdAt: 'desc' }, // Opcional: para traer los más recientes primero
-    });
-    return movements;
+  async getStockExit(userId: string, dto: FindStockDto) {
+    const { page, limit } = dto;
+
+    const skip = (page - 1) * limit;
+
+    const [movements, total] = await Promise.all([
+      this.prisma.movementHistory.findMany({
+        where: {
+          userId,
+          type: 'STOCK_EXIT',
+        },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.movementHistory.count({
+        where: { userId, type: 'STOCK_EXIT' },
+      }),
+    ]);
+
+    return {
+      data: movements,
+      pagination: {
+        page,
+        limit,
+        totalItems: total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
-  async getMovements(userId: string) {
-    const movements = await this.prisma.movementHistory.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' }, // Opcional: para traer los más recientes primero
-    });
-    return movements;
+  async getMovements(userId: string, dto: FindMovementsDto) {
+    const { page, limit, movementType } = dto;
+
+    const skip = (page - 1) * limit;
+
+    const where = {
+      userId: userId,
+      ...(movementType && { type: movementType }),
+    };
+
+    const [movements, total] = await Promise.all([
+      this.prisma.movementHistory.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.movementHistory.count({ where }),
+    ]);
+
+    return {
+      data: movements,
+      pagination: {
+        page,
+        limit,
+        totalItems: total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 }
