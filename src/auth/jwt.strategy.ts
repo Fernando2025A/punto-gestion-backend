@@ -13,7 +13,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         (request: Request) => {
           let token = null;
           if (request?.cookies) {
-            token = request.cookies?.access_token;
+            const cookieName = process.env.AUTH_COOKIE_NAME ?? 'access_token';
+            token = request.cookies?.[cookieName];
           }
           return token;
         },
@@ -23,7 +24,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string; username: string }) {
+  async validate(payload: { sub: string; username?: string; email?: string | null; emailVerified?: boolean; provider?: string }) {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
     });
@@ -35,6 +36,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     return {
       id: user.id,
       username: user.username,
+      email: user.email,
+      emailVerified: user.emailVerified,
+      provider: user.provider,
     };
   }
 }

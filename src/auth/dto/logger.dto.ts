@@ -1,11 +1,17 @@
-import { IsString, Length } from "class-validator";
+import { IsOptional, IsString, Length } from 'class-validator';
 
 export class LoggerDto {
+  @IsOptional()
   @IsString()
-  @Length(3, 12)
-  username: string;
+  @Length(3, 255)
+  identifier?: string;
 
-  @Length(6, 14)
+  @IsOptional()
+  @IsString()
+  @Length(3, 255)
+  username?: string;
+
+  @Length(6, 72)
   @IsString()
   password: string;
 }

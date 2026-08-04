@@ -93,7 +93,14 @@ export class MovementsService {
         },
       });
 
-      // Registrar historial...
+      await tx.movementHistory.create({
+        data: {
+          type: MovementType.CREATE_PRODUCT,
+          productId: product.id,
+          inventoryId,
+          userId,
+        },
+      });
       return product;
     });
   }
