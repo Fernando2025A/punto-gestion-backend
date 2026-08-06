@@ -172,6 +172,11 @@ export class AuthController {
     return { message: 'Sesión cerrada' };
   }
 
+  @Public()
+  @Post('demo')
+  async createDemoUser() {
+    return this.authService.createDemoUser();
+  }
   @Get('me')
   me(@CurrentUser() user: JwtPayload) {
     return user;

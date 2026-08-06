@@ -59,8 +59,13 @@ export class InventoryService {
       where: { userId },
     });
     if (!inventory) throw new NotFoundException('No se encontró un inventario');
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!user) throw new NotFoundException('No se encontró un usuario');
+    const stockAlertLevel: number = Number(user.stockAlertAt ?? 10); // Nivel de alerta por defecto si no está definido
     const products = await this.prisma.product.findMany({
-      where: { inventoryId: inventory.id, stock: { lt: 5 } }, // Productos con stock menor a 5
+      where: { inventoryId: inventory.id, stock: { lt: stockAlertLevel } }, // Productos con stock menor al nivel de alerta
       orderBy: { stock: 'asc' }, // Ordenamos de menor a mayor stock
     });
     return products;
@@ -77,5 +82,20 @@ export class InventoryService {
       _count: { category: true },
     });
     return categories;
+  }
+
+  async getOutOfStock(userId: string) {
+    const products = await this.prisma.product.findMany({
+      where: {
+        inventory: {
+          userId: userId,
+        },
+        stock: 0, // Filtramos productos con stock igual a 0
+      },
+      orderBy: {
+        name: 'asc', // Ordenamos alfabéticamente por nombre
+      },
+    });
+    return products;
   }
 }

@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "expireAlertAt" INTEGER NOT NULL DEFAULT 30,
+ADD COLUMN     "stockAlertAt" INTEGER NOT NULL DEFAULT 10;

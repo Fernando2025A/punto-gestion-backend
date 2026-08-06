@@ -16,6 +16,11 @@ model User {
   provider         AuthProvider    @default(LOCAL)
   emailVerified    Boolean         @default(false)
 
+  stockAlertAt     Int             @default(10)             // Nivel de stock para alertas (opcional)
+  expireAlertAt    Int             @default(30)             // Días antes de la expiración para alertas (opcional)
+
+  isTemporaly       Boolean         @default(false)         // Indica si es un usuario temporal (ej: invitado)
+  expiresAt         DateTime?                               // Fecha de expiración del usuario temporal (opcional)
   // Relaciones del sistema de inventario
   inventory        Inventory?
   movements        MovementHistory[]
@@ -54,7 +59,7 @@ enum AuthProvider {
 model Inventory {
   id         Int               @id @default(autoincrement())
   userId     String            @unique
-  user       User              @relation(fields: [userId], references: [id])
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   products   Product[]
   movements  MovementHistory[]
   suppliers  Supplier[]        // 👈 Relación con los proveedores del inventario
@@ -74,7 +79,7 @@ model Product {
   updatedAt     DateTime       @updatedAt
 
   inventoryId   Int
-  inventory     Inventory      @relation(fields: [inventoryId], references: [id])
+  inventory     Inventory      @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
 
   // Relación Opcional con Supplier
   supplierId    Int?

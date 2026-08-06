@@ -147,6 +147,8 @@ export class AuthService {
     email: string | null;
     emailVerified: boolean;
     provider: string;
+    isTemporaly?: boolean;
+    expiresAt?: Date | null;
   }) {
     const payload = {
       sub: user.id,
@@ -154,6 +156,8 @@ export class AuthService {
       email: user.email,
       emailVerified: user.emailVerified,
       provider: user.provider,
+      isTemporaly: user.isTemporaly,
+      expiresAt: user.expiresAt,
     };
     const accessToken = this.jwtService.sign(
       payload as never,
@@ -191,6 +195,8 @@ export class AuthService {
         email: user.email,
         emailVerified: user.emailVerified,
         provider: user.provider,
+        isTemporaly: user.isTemporaly,
+        expiresAt: user.expiresAt,
       },
     };
   }
@@ -301,5 +307,36 @@ export class AuthService {
     }
 
     return candidate;
+  }
+
+  async createDemoUser() {
+    const userData = {
+      username: `user${Math.floor(Math.random() * 100000)}`,
+      email: `user${Math.floor(Math.random() * 100000)}@demo.com`,
+      password: Math.floor(Math.random() * 1000000).toString(), // Generate a random 6-digit password
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // Expira en 24 horas
+    };
+
+    const hashedPassword = await bcrypt.hash(userData.password, 10);
+    const newUser = await this.prisma.user.create({
+      data: {
+        username: userData.username,
+        password: hashedPassword,
+        email: userData.email,
+        isTemporaly: true,
+        expiresAt: userData.expiresAt,
+      },
+    });
+
+    await this.prisma.inventory.create({
+      data: {
+        userId: newUser.id,
+      },
+    });
+
+    return {
+      username: newUser.username,
+      password: userData.password,
+    };
   }
 }
