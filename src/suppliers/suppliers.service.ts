@@ -3,6 +3,8 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
@@ -13,31 +15,64 @@ import { FindSupplierDto } from './dto/find-supplier.dto';
 export class SuppliersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // Helper privado para obtener o crear el inventario del usuario
-  private async getOrCreateInventory(userId: string) {
-    let inventory = await this.prisma.inventory.findUnique({
-      where: { userId },
+  /**
+   * Helper privado para validar que el usuario pertenezca al negocio y obtener su inventoryId
+   */
+  private async getInventoryAndValidateAccess(
+    userId: string,
+    businessId: number,
+  ) {
+    const employee = await this.prisma.businessEmployee.findUnique({
+      where: {
+        userId_businessId: {
+          userId,
+          businessId,
+        },
+      },
+      select: {
+        isActive: true,
+        business: {
+          select: {
+            inventory: {
+              select: { id: true },
+            },
+          },
+        },
+      },
     });
 
-    if (!inventory) {
-      inventory = await this.prisma.inventory.create({
-        data: { userId },
-      });
+    if (!employee || !employee.isActive) {
+      throw new ForbiddenException('No tienes acceso a este negocio');
     }
 
-    return inventory;
+    const inventoryId = employee.business.inventory?.id;
+
+    if (!inventoryId) {
+      throw new NotFoundException(
+        'No se encontró un inventario asignado a este negocio',
+      );
+    }
+
+    return inventoryId;
   }
 
-  // Crear proveedor asociado al usuario
-  async create(createSupplierDto: CreateSupplierDto, userId: string) {
-    const inventory = await this.getOrCreateInventory(userId);
+  // Crear proveedor
+  async create(
+    createSupplierDto: CreateSupplierDto,
+    userId: string,
+    businessId: number,
+  ) {
+    const inventoryId = await this.getInventoryAndValidateAccess(
+      userId,
+      businessId,
+    );
 
     // Validar si ya existe el nombre en este inventario
     const existing = await this.prisma.supplier.findUnique({
       where: {
         name_inventoryId: {
           name: createSupplierDto.name,
-          inventoryId: inventory.id,
+          inventoryId,
         },
       },
     });
@@ -51,22 +86,24 @@ export class SuppliersService {
     return await this.prisma.supplier.create({
       data: {
         ...createSupplierDto,
-        inventoryId: inventory.id,
+        inventoryId,
       },
     });
   }
 
-  // Listar todos los proveedores del usuario
-  async findAll(userId: string, dto: FindSupplierDto) {
-    const inventory = await this.getOrCreateInventory(userId);
+  // Listar todos los proveedores
+  async findAll(userId: string, dto: FindSupplierDto, businessId: number) {
+    const inventoryId = await this.getInventoryAndValidateAccess(
+      userId,
+      businessId,
+    );
 
-    const { page, limit } = dto;
-
+    const { page = 1, limit = 10 } = dto;
     const skip = (page - 1) * limit;
 
     const [suppliers, total] = await Promise.all([
       this.prisma.supplier.findMany({
-        where: { inventoryId: inventory.id },
+        where: { inventoryId },
         include: {
           _count: {
             select: { products: true },
@@ -77,7 +114,7 @@ export class SuppliersService {
         take: limit,
       }),
       this.prisma.supplier.count({
-        where: { inventoryId: inventory.id },
+        where: { inventoryId },
       }),
     ]);
 
@@ -92,13 +129,16 @@ export class SuppliersService {
     };
   }
 
-  // Obtener un proveedor por ID y userId
-  async findOne(id: number, userId: string) {
-    const inventory = await this.getOrCreateInventory(userId);
-    return await this.findOneByIdAndInventory(id, inventory.id);
+  // Obtener un proveedor por ID
+  async findOne(id: number, userId: string, businessId: number) {
+    const inventoryId = await this.getInventoryAndValidateAccess(
+      userId,
+      businessId,
+    );
+    return await this.findOneByIdAndInventory(id, inventoryId);
   }
 
-  // Método auxiliar reutilizable (útil para ProductsService cuando ya se tiene el inventoryId)
+  // Método auxiliar reutilizable directamente por ProductsService o internamente
   async findOneByIdAndInventory(id: number, inventoryId: number) {
     const supplier = await this.prisma.supplier.findFirst({
       where: { id, inventoryId },
@@ -121,8 +161,27 @@ export class SuppliersService {
     id: number,
     updateSupplierDto: UpdateSupplierDto,
     userId: string,
+    businessId: number,
   ) {
-    const supplier = await this.findOne(id, userId); // Ya me asegura pertenencia y existencia
+    const supplier = await this.findOne(id, userId, businessId);
+
+    // Si se está cambiando el nombre, validar que no colisione con otro proveedor del mismo inventario
+    if (updateSupplierDto.name && updateSupplierDto.name !== supplier.name) {
+      const existing = await this.prisma.supplier.findUnique({
+        where: {
+          name_inventoryId: {
+            name: updateSupplierDto.name,
+            inventoryId: supplier.inventoryId,
+          },
+        },
+      });
+
+      if (existing) {
+        throw new ConflictException(
+          'Ya existe otro proveedor con este nombre en tu inventario',
+        );
+      }
+    }
 
     return await this.prisma.supplier.update({
       where: { id: supplier.id },
@@ -131,8 +190,15 @@ export class SuppliersService {
   }
 
   // Eliminar proveedor
-  async remove(id: number, userId: string) {
-    const supplier = await this.findOne(id, userId); // Ya me asegura pertenencia y existencia
+  async remove(id: number, userId: string, businessId: number) {
+    const supplier = await this.findOne(id, userId, businessId);
+
+    // Validar si tiene productos vinculados para evitar romper la FK de la DB
+    if (supplier.products.length > 0) {
+      throw new BadRequestException(
+        `No se puede eliminar el proveedor porque tiene ${supplier.products.length} producto(s) asociado(s). Reasigna los productos a otro proveedor primero.`,
+      );
+    }
 
     return await this.prisma.supplier.delete({
       where: { id: supplier.id },

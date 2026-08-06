@@ -24,24 +24,27 @@ export class SuppliersController {
   create(
     @Body() createSupplierDto: CreateSupplierDto,
     @CurrentUser('id') userId: string,
+    @Query('businessId', ParseIntPipe) businessId: number,
   ) {
-    return this.suppliersService.create(createSupplierDto, userId);
+    return this.suppliersService.create(createSupplierDto, userId, businessId);
   }
 
-  @Get()
+  @Get('business/:id')
   findAll(
+    @Param('id', ParseIntPipe) businessId: number,
     @CurrentUser('id') userId: string,
     @Query() paginationDto: FindSupplierDto,
   ) {
-    return this.suppliersService.findAll(userId, paginationDto);
+    return this.suppliersService.findAll(userId, paginationDto, businessId);
   }
 
   @Get(':id')
   findOne(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser('id') userId: string,
+    @Query('businessId', ParseIntPipe) businessId: number,
   ) {
-    return this.suppliersService.findOne(id, userId);
+    return this.suppliersService.findOne(id, userId, businessId);
   }
 
   @Patch(':id')
@@ -49,15 +52,22 @@ export class SuppliersController {
     @Param('id', ParseIntPipe) id: number,
     @Body() updateSupplierDto: UpdateSupplierDto,
     @CurrentUser('id') userId: string,
+    @Query('businessId', ParseIntPipe) businessId: number,
   ) {
-    return this.suppliersService.update(id, updateSupplierDto, userId);
+    return this.suppliersService.update(
+      id,
+      updateSupplierDto,
+      userId,
+      businessId,
+    );
   }
 
   @Delete(':id')
   remove(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser('id') userId: string,
+    @Query('businessId', ParseIntPipe) businessId: number,
   ) {
-    return this.suppliersService.remove(id, userId);
+    return this.suppliersService.remove(id, userId, businessId);
   }
 }

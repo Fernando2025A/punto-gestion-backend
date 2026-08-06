@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -257,33 +258,32 @@ export class MovementsService {
     });
   }
 
-  async getTodayMovements(userId: string) {
-    // 1. Obtener el inventario del usuario
-    const inventory = await this.prisma.inventory.findUnique({
-      where: { userId },
-    });
-
-    if (!inventory) {
-      throw new NotFoundException('Inventario no encontrado');
-    }
-
-    // 2. Definir el inicio del día (00:00:00.000) y el fin (23:59:59.999)
+  async getTodayMovements(inventoryId: number) {
+    // 1. Definir el inicio y fin del día actual en tiempo local/servidor
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
 
-    // 3. Consultar los movimientos dentro del rango
-    return await this.prisma.movementHistory.findMany({
+    // 2. Consultar directamente usando el índice @@index([inventoryId, createdAt]) de tu esquema
+    const movements = await this.prisma.movementHistory.findMany({
       where: {
-        inventoryId: inventory.id,
+        inventoryId,
         createdAt: {
           gte: startOfDay,
           lte: endOfDay,
         },
       },
-      include: {
+      select: {
+        id: true,
+        type: true,
+        quantity: true,
+        previousStock: true,
+        newStock: true,
+        reason: true,
+        details: true,
+        createdAt: true,
         product: {
           select: {
             id: true,
@@ -292,68 +292,114 @@ export class MovementsService {
             price: true,
           },
         },
+        user: {
+          select: {
+            id: true,
+            username: true,
+          },
+        },
       },
       orderBy: {
-        createdAt: 'desc', // Los más recientes primero
+        createdAt: 'desc',
       },
     });
+
+    return movements;
   }
 
-  async getLast7DaysMovementsSummary(userId: string) {
-    // 1. Obtener el inventario del usuario
-    const inventory = await this.prisma.inventory.findUnique({
-      where: { userId },
+  async getLast7DaysMovementsSummary(userId: string, businessId: number) {
+    // 1. Validar acceso del usuario al negocio y obtener el inventoryId
+    const employee = await this.prisma.businessEmployee.findUnique({
+      where: {
+        userId_businessId: {
+          userId,
+          businessId,
+        },
+      },
+      select: {
+        isActive: true,
+        business: {
+          select: {
+            inventory: {
+              select: { id: true },
+            },
+          },
+        },
+      },
     });
 
-    if (!inventory) {
-      throw new NotFoundException('Inventario no encontrado');
+    if (!employee || !employee.isActive) {
+      throw new ForbiddenException('No tienes acceso a este negocio');
+    }
+
+    const inventoryId = employee.business.inventory?.id;
+
+    if (!inventoryId) {
+      throw new NotFoundException(
+        'No se encontró el inventario para este negocio',
+      );
     }
 
     // 2. Definir el rango de los últimos 7 días
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
     const startOf7DaysAgo = new Date();
     startOf7DaysAgo.setDate(startOf7DaysAgo.getDate() - 6);
     startOf7DaysAgo.setHours(0, 0, 0, 0);
 
-    const endOfToday = new Date();
-    endOfToday.setHours(23, 59, 59, 999);
-
-    // 3. Consultar todos los movimientos del rango (solo id y createdAt para optimizar)
+    // 3. Consultar los movimientos dentro del rango
     const movements = await this.prisma.movementHistory.findMany({
       where: {
-        inventoryId: inventory.id,
+        inventoryId,
         createdAt: {
           gte: startOf7DaysAgo,
           lte: endOfToday,
         },
       },
       select: {
+        type: true,
         createdAt: true,
       },
     });
 
-    // 4. Agrupar por fecha en formato YYYY-MM-DD
-    const summaryMap: Record<string, number> = {};
+    // Función helper para formatear fechas a YYYY-MM-DD en hora local (evita desfase UTC)
+    const formatLocalYYYYMMDD = (date: Date): string => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
 
-    // Inicializar los últimos 7 días en 0 por si hay días sin movimientos
+    // 4. Inicializar los últimos 7 días con conteos en 0
+    const summaryMap: Record<
+      string,
+      { total: number; entries: number; exits: number }
+    > = {};
+
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0]; // "2026-07-30"
-      summaryMap[dateStr] = 0;
+      const dateStr = formatLocalYYYYMMDD(d);
+      summaryMap[dateStr] = { total: 0, entries: 0, exits: 0 };
     }
 
-    // Contar movimientos por día
+    // 5. Agrupar conteos por día respetando la zona horaria local
     movements.forEach((movement) => {
-      const dateStr = movement.createdAt.toISOString().split('T')[0];
-      if (summaryMap[dateStr] !== undefined) {
-        summaryMap[dateStr] += 1;
+      const dateStr = formatLocalYYYYMMDD(movement.createdAt);
+      if (summaryMap[dateStr]) {
+        summaryMap[dateStr].total += 1;
+        if (movement.type === 'STOCK_ENTRY') summaryMap[dateStr].entries += 1;
+        if (movement.type === 'STOCK_EXIT') summaryMap[dateStr].exits += 1;
       }
     });
 
-    // 5. Convertir el mapa a una lista ordenada de objetos
-    return Object.entries(summaryMap).map(([date, totalMovements]) => ({
+    // 6. Formatear la respuesta para el frontend
+    return Object.entries(summaryMap).map(([date, data]) => ({
       date,
-      totalMovements,
+      totalMovements: data.total,
+      entries: data.entries,
+      exits: data.exits,
     }));
   }
 

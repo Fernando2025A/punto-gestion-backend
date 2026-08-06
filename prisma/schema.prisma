@@ -9,27 +9,33 @@ datasource db {
 }
 
 model User {
-  id               String          @id @default(uuid())
-  username         String          @unique
-  email            String?         @unique
-  password         String?         // Opcional: nulo si provider es GOOGLE
-  provider         AuthProvider    @default(LOCAL)
-  emailVerified    Boolean         @default(false)
+  id              String            @id @default(uuid())
+  username        String            @unique
+  email           String?           @unique
+  password        String?
+  provider        AuthProvider      @default(LOCAL)
+  emailVerified   Boolean           @default(false)
 
-  stockAlertAt     Int             @default(10)             // Nivel de stock para alertas (opcional)
-  expireAlertAt    Int             @default(30)             // Días antes de la expiración para alertas (opcional)
+  stockAlertAt    Int               @default(10)
+  expireAlertAt   Int               @default(30)
 
-  isTemporaly       Boolean         @default(false)         // Indica si es un usuario temporal (ej: invitado)
-  expiresAt         DateTime?                               // Fecha de expiración del usuario temporal (opcional)
-  // Relaciones del sistema de inventario
-  inventory        Inventory?
-  movements        MovementHistory[]
+  isTemporaly     Boolean           @default(false)
+  expiresAt       DateTime?
 
-  // Relación con tokens de seguridad / sesión
-  tokens           UserToken[]
+  // Relaciones
+  // 1. Negocios de los que es dueño directo
+  ownedBusinesses Business[]        @relation("BusinessOwner")
+  
+  // 2. Negocios donde trabaja (incluye su propio negocio y los de otros)
+  employments     BusinessEmployee[]
 
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  movements       MovementHistory[]
+  tokens          UserToken[]
+
+  createdInvites BusinessInvite[]
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 }
 
 model UserToken {
@@ -43,6 +49,8 @@ model UserToken {
 
   @@index([token])
   @@index([userId])
+
+  createdAt DateTime @default(now())
 }
 
 enum TokenType {
@@ -56,21 +64,184 @@ enum AuthProvider {
   GOOGLE
 }
 
+model Business {
+  id          Int                @id @default(autoincrement())
+  name        String
+
+  description String?
+  
+  // Relaciones
+  ownerId     String
+  owner       User               @relation("BusinessOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  
+  employees   BusinessEmployee[]
+  invites     BusinessInvite[]   // 👈 Códigos de invitación generados
+  inventory   Inventory?
+
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+}
+
+model BusinessInvite {
+  id          Int          @id @default(autoincrement())
+  code        String       @unique // Ej: "INV-8921" (6 a 8 caracteres alfanuméricos)
+  
+  role        EmployeeRole @default(EMPLOYEE) // Rol que se le asignará a quien use el código
+  
+  expiresAt   DateTime     // 👈 Fecha y hora límite de validez
+  maxUses     Int          @default(1)      // Límite de personas que pueden usar el código (ej: 1 o 5 personas)
+  usedCount   Int          @default(0)
+
+  // Relación con el Negocio que invita
+  businessId  Int
+  business    Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  // Opcional: Saber qué usuario/administrador creó la invitación
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  
+  createdAt   DateTime     @default(now())
+
+  @@index([code])
+}
+
+enum EmployeeRole {
+  OWNER
+  ADMIN
+  CASHIER    // Cajero (solo ventas)
+  STOCKER    // Encargado de inventario
+  EMPLOYEE   // General
+}
+
+model BusinessEmployee {
+  id          Int          @id @default(autoincrement())
+  
+  role        EmployeeRole
+
+  permissions Permission[]
+  isActive    Boolean      @default(true) // Si se desactiva, no puede entrar más a este negocio
+
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  businessId  Int
+  business    Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([userId, businessId]) // Un usuario no puede estar duplicado en el mismo negocio
+  @@index([businessId])
+  @@index([userId])
+}
+
+enum Permission {
+  // ==========================
+  // PRODUCTOS
+  // ==========================
+  VIEW_PRODUCT
+  CREATE_PRODUCT
+  UPDATE_PRODUCT
+  DELETE_PRODUCT
+
+  // ==========================
+  // STOCK
+  // ==========================
+  REGISTER_STOCK_ENTRY
+  REGISTER_STOCK_EXIT
+  ADJUST_STOCK
+  VIEW_MOVEMENTS
+
+  // ==========================
+  // CATEGORÍAS
+  // ==========================
+  VIEW_CATEGORIES
+  CREATE_CATEGORIES
+  UPDATE_CATEGORIES
+  DELETE_CATEGORIES
+
+  // ==========================
+  // PROVEEDORES
+  // ==========================
+  VIEW_SUPPLIERS
+  CREATE_SUPPLIERS
+  UPDATE_SUPPLIERS
+  DELETE_SUPPLIERS
+
+  // ==========================
+  // REPORTES
+  // ==========================
+  VIEW_REPORTS
+  EXPORT_REPORTS_PDF
+  EXPORT_REPORTS_EXCEL
+
+  // ==========================
+  // DASHBOARD
+  // ==========================
+  VIEW_DASHBOARD
+  VIEW_FINANCIAL_SUMMARY
+
+  // ==========================
+  // EMPLEADOS
+  // ==========================
+  VIEW_EMPLOYEES
+  CREATE_EMPLOYEES
+  UPDATE_EMPLOYEES
+  DELETE_EMPLOYEES
+
+  MANAGE_EMPLOYEE_PERMISSIONS
+  MANAGE_EMPLOYEE_ROLES
+
+  // ==========================
+  // INVITACIONES
+  // ==========================
+  CREATE_INVITATIONS
+  DELETE_INVITATIONS
+  VIEW_INVITATIONS
+
+  // ==========================
+  // CONFIGURACIÓN
+  // ==========================
+  VIEW_SETTINGS
+  UPDATE_SETTINGS
+
+  // ==========================
+  // NEGOCIO
+  // ==========================
+  UPDATE_BUSINESS
+  DELETE_BUSINESS
+
+  // ==========================
+  // PERFIL
+  // ==========================
+  UPDATE_PROFILE
+  CHANGE_PASSWORD
+
+  // ==========================
+  // PREMIUM
+  // ==========================
+  MANAGE_SUBSCRIPTION
+}
+
 model Inventory {
-  id         Int               @id @default(autoincrement())
-  userId     String            @unique
-  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  products   Product[]
-  movements  MovementHistory[]
-  suppliers  Supplier[]        // 👈 Relación con los proveedores del inventario
+  id          Int               @id @default(autoincrement())
+  
+  // Ahora el inventario pertenece a un Business en lugar de a un User directamente
+  businessId  Int               @unique
+  business    Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  products    Product[]
+  movements   MovementHistory[]
+  suppliers   Supplier[]
 }
 
 model Product {
   id            Int            @id @default(autoincrement())
   name          String
-  price         Float
-  purchasePrice Float?
+  price         Decimal        @db.Decimal(10,2)
+  purchasePrice Decimal?       @db.Decimal(10,2)
   stock         Int
+  minimumStock    Int?
 
   category      Category
   expirationDate DateTime?     // 👈 Opcional: obligatorio en la lógica si es "FOOD"
@@ -86,6 +257,8 @@ model Product {
   supplier      Supplier?      @relation(fields: [supplierId], references: [id], onDelete: SetNull)
 
   movements     MovementHistory[]
+
+  @@index([inventoryId])
 }
 
 model Supplier {
@@ -102,6 +275,7 @@ model Supplier {
   updatedAt   DateTime  @updatedAt
 
   @@unique([name, inventoryId]) // Evita proveedores duplicados en el mismo inventario
+  @@index([inventoryId])
 }
 
 //enum para categorias de productos:
@@ -150,4 +324,7 @@ model MovementHistory {
   // Relación con el usuario que ejecutó la acción
   userId      String?
   user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([inventoryId, createdAt])
 }

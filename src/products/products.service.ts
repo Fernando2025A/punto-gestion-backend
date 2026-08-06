@@ -1,8 +1,8 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -14,6 +14,7 @@ import { StockExitDto } from 'src/movements/dto/stock-exit.dto';
 import { StockEntryDto } from 'src/movements/dto/stock-entry.dto';
 import { SuppliersService } from 'src/suppliers/suppliers.service';
 import { Category } from 'generated/prisma/enums';
+import { Prisma } from 'generated/prisma/client';
 
 @Injectable()
 export class ProductsService {
@@ -24,165 +25,316 @@ export class ProductsService {
   ) {}
 
   // Helper privado para obtener o crear el inventario del usuario
-  private async getOrCreateInventory(userId: string) {
-    let inventory = await this.prisma.inventory.findUnique({
-      where: { userId },
+  async getOrCreateInventoryForBusiness(businessId: number, userId: string) {
+    // 1. Validar primero que el usuario sea empleado activo o dueño de ESTE negocio
+    const employee = await this.prisma.businessEmployee.findUnique({
+      where: {
+        userId_businessId: {
+          userId,
+          businessId,
+        },
+      },
+      select: {
+        isActive: true,
+        business: {
+          select: {
+            id: true,
+            inventory: {
+              select: { id: true, businessId: true },
+            },
+          },
+        },
+      },
     });
 
+    // Si no existe la relación o el empleado está desactivado, denegar acceso de inmediato (403)
+    if (!employee || !employee.isActive) {
+      throw new ForbiddenException(
+        'No tienes permisos para acceder ni modificar el inventario de este negocio',
+      );
+    }
+
+    // 2. Si el negocio existe y el usuario tiene permiso, verificar si ya tiene inventario
+    let inventory = employee.business.inventory;
+
+    // 3. Si por algún motivo de migración/legacy el negocio no tenía inventario, lo creamos
     if (!inventory) {
       inventory = await this.prisma.inventory.create({
-        data: { userId },
+        data: { businessId },
+        select: { id: true, businessId: true },
       });
     }
 
     return inventory;
   }
 
-  async create(dto: CreateProductDto, user: JwtPayload) {
-    const inventory = await this.getOrCreateInventory(user.id);
+  async create(dto: CreateProductDto, userId: string, businessId: number) {
+    const inventory = await this.getOrCreateInventoryForBusiness(
+      businessId,
+      userId,
+    );
 
     // Delegamos a MovementsService la creación (que crea el producto y el historial en 1 sola transacción)
-    return await this.movements.createProduct(dto, user.id, inventory.id);
+    return await this.movements.createProduct(dto, userId, inventory.id);
   }
 
   // 🔹 Método para registrar Entradas de Stock (Compras, Reabastecimiento)
-  async recordStockEntry(dto: StockEntryDto, user: JwtPayload) {
-    const inventory = await this.getOrCreateInventory(user.id);
-    return await this.movements.recordStockEntry(dto, user.id, inventory.id);
+  async recordStockEntry(
+    dto: StockEntryDto,
+    userId: string,
+    businessId: number,
+  ) {
+    const inventory = await this.getOrCreateInventoryForBusiness(
+      businessId,
+      userId,
+    );
+    return await this.movements.recordStockEntry(dto, userId, inventory.id);
   }
 
   // 🔹 Método para registrar Salidas de Stock (Ventas, Mermas, Pérdidas)
-  async recordStockExit(dto: StockExitDto, user: JwtPayload) {
-    const inventory = await this.getOrCreateInventory(user.id);
-    return await this.movements.recordStockExit(dto, user.id, inventory.id);
+  async recordStockExit(dto: StockExitDto, userId: string, businessId: number) {
+    const inventory = await this.getOrCreateInventoryForBusiness(
+      businessId,
+      userId,
+    );
+    return await this.movements.recordStockExit(dto, userId, inventory.id);
   }
 
-  async findAll(user: JwtPayload, dto: FindProductsDto) {
-    const { page, limit, category } = dto;
+  async findAll(user: JwtPayload, dto: FindProductsDto, businessId: number) {
+    const { page = 1, limit = 10, category, search } = dto;
 
-    const inventory = await this.prisma.inventory.findUnique({
-      where: { userId: user.id },
-      select: { id: true },
+    // 1. Validar que el usuario tenga acceso al negocio y obtener el inventoryId
+    const employee = await this.prisma.businessEmployee.findUnique({
+      where: {
+        userId_businessId: {
+          userId: user.id,
+          businessId,
+        },
+      },
+      select: {
+        isActive: true,
+        business: {
+          select: {
+            inventory: {
+              select: { id: true },
+            },
+          },
+        },
+      },
     });
 
-    if (!inventory) {
+    if (!employee || !employee.isActive) {
+      throw new ForbiddenException('No tienes acceso a este negocio');
+    }
+
+    const inventoryId = employee.business.inventory?.id;
+
+    if (!inventoryId) {
       throw new NotFoundException(
-        'No se encontró un inventario para este usuario',
+        'No se encontró el inventario para este negocio',
       );
     }
 
+    // 2. Construir la cláusula `where` dinámica
     const skip = (page - 1) * limit;
 
-    const where = {
-      inventoryId: inventory.id,
+    const where: Prisma.ProductWhereInput = {
+      inventoryId,
       ...(category && { category }),
+      ...(search && {
+        name: { contains: search, mode: 'insensitive' },
+      }),
     };
 
+    // 3. Ejecutar consulta paginada y conteo en paralelo
     const [products, total] = await Promise.all([
       this.prisma.product.findMany({
         where,
         skip,
         take: limit,
-        orderBy: { id: 'asc' },
+        orderBy: { createdAt: 'desc' }, // Es mejor ordenar por los más recientes
+        include: {
+          supplier: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
       }),
       this.prisma.product.count({ where }),
     ]);
 
+    // 4. Formatear la respuesta convirtiendo el precio a número
+    const formattedProducts = products.map((product) => ({
+      ...product,
+      price: Number(product.price),
+    }));
+
     return {
-      data: products,
+      data: formattedProducts,
       pagination: {
         page,
         limit,
         totalItems: total,
         totalPages: Math.ceil(total / limit),
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPreviousPage: page > 1,
       },
     };
   }
 
-  async findOne(user: JwtPayload, productId: number) {
-    await this.validateProduct(user, productId);
+  async findOne(userId: string, productId: number, businessId: number) {
+    await this.validateProduct(userId, productId, businessId);
     return await this.prisma.product.findUnique({
       where: { id: productId },
     });
   }
 
-  // ⚠️ Este update es EXCLUSIVO para metadatos (nombre, precio, categoría)
-  async update(dto: UpdateProductDto, user: JwtPayload, productId: number) {
-    // Validar propiedad del producto
-    await this.validateProduct(user, productId);
-
-    const inventory = await this.prisma.inventory.findUnique({
-      where: { userId: user.id },
+  async update(
+    dto: UpdateProductDto,
+    userId: string,
+    productId: number,
+    businessId: number,
+  ) {
+    // 1. Validar que el usuario pertenezca al negocio y esté activo
+    const employee = await this.prisma.businessEmployee.findUnique({
+      where: {
+        userId_businessId: {
+          userId: userId,
+          businessId,
+        },
+      },
+      select: {
+        isActive: true,
+        role: true,
+        business: {
+          select: {
+            inventory: {
+              select: { id: true },
+            },
+          },
+        },
+      },
     });
 
-    if (!inventory) {
+    if (!employee || !employee.isActive) {
+      throw new ForbiddenException('No tienes acceso a este negocio');
+    }
+
+    const inventoryId = employee.business.inventory?.id;
+
+    if (!inventoryId) {
       throw new NotFoundException(
-        'No se encontró un inventario para este usuario',
+        'No se encontró el inventario de este negocio',
       );
     }
 
-    // Si actualizan la categoría a FOOD o cambian fecha de expiración en un alimento
-    if (dto.category === Category.FOOD && dto.expirationDate === null) {
+    // 2. Validar que el producto pertenezca al inventario de ESTE negocio
+    const existingProduct = await this.prisma.product.findFirst({
+      where: {
+        id: productId,
+        inventoryId,
+      },
+      select: { id: true, category: true },
+    });
+
+    if (!existingProduct) {
+      throw new NotFoundException(
+        'El producto no existe o no pertenece a este negocio',
+      );
+    }
+
+    // 3. Validar regla de negocio de categoría FOOD y fecha de expiración
+    const finalCategory = dto.category ?? existingProduct.category;
+    if (finalCategory === Category.FOOD && dto.expirationDate === null) {
       throw new BadRequestException(
-        'Un producto de la categoría FOOD debe mantener una fecha de expiración válida',
+        'Un producto de categoría FOOD debe mantener una fecha de expiración válida',
       );
     }
 
-    // Si están cambiando/asignando un nuevo proveedor, lo validamos
+    // 4. Si se especifica un proveedor, validar que pertenezca al MISMO negocio
     if (dto.supplierId) {
-      await this.suppliersService.findOne(dto.supplierId, inventory.userId);
+      await this.suppliersService.findOne(dto.supplierId, userId, businessId);
     }
 
-    // Ignoramos el cambio de stock directo si viniera en el DTO
-    const { stock, ...cleanDto } = dto as any;
+    // 5. Omitir el campo stock de forma segura en TypeScript
+    const { stock, ...cleanDto } = dto;
 
-    // Delegamos la actualización e historial a MovementsService
+    // 6. Delegar actualización e historial a MovementsService pasando el inventoryId correcto
     return await this.movements.recordProductUpdate(
       productId,
       cleanDto,
-      user.id,
-      inventory.id,
+      userId,
+      inventoryId,
     );
   }
 
-  async delete(user: JwtPayload, productId: number) {
-    await this.validateProduct(user, productId);
+  async delete(userId: string, productId: number, businessId: number) {
+    // 1. Validamos la existencia y pertenencia del producto al negocio
+    const inventoryId = await this.validateProduct(
+      userId,
+      productId,
+      businessId,
+    );
 
-    const inventory = await this.prisma.inventory.findUnique({
-      where: { userId: user.id },
+    // 2. Delegamos la eliminación e historial a MovementsService
+    return await this.movements.deleteProduct(productId, userId, inventoryId);
+  }
+
+  private async validateProduct(
+    userId: string,
+    productId: number,
+    businessId: number,
+  ): Promise<number> {
+    // 1. Validar que el usuario sea empleado activo del negocio y obtener su inventoryId
+    const employee = await this.prisma.businessEmployee.findUnique({
+      where: {
+        userId_businessId: {
+          userId,
+          businessId,
+        },
+      },
+      select: {
+        isActive: true,
+        business: {
+          select: {
+            inventory: {
+              select: { id: true },
+            },
+          },
+        },
+      },
     });
 
-    if (!inventory) {
+    if (!employee || !employee.isActive) {
+      throw new ForbiddenException('No tienes acceso a este negocio');
+    }
+
+    const inventoryId = employee.business.inventory?.id;
+
+    if (!inventoryId) {
       throw new NotFoundException(
-        'No se encontró un inventario para este usuario',
+        'No se encontró un inventario para este negocio',
       );
     }
 
-    // Delegamos la eliminación e historial a MovementsService
-    return await this.movements.deleteProduct(productId, user.id, inventory.id);
-  }
-
-  private async validateProduct(user: JwtPayload, productId: number) {
-    const inventory = await this.prisma.inventory.findUnique({
-      where: { userId: user.id },
+    // 2. Consultar el producto y verificar en un solo paso que pertenezca a ESTE inventario
+    const product = await this.prisma.product.findFirst({
+      where: {
+        id: productId,
+        inventoryId,
+      },
+      select: { id: true },
     });
 
-    if (!inventory)
+    if (!product) {
       throw new NotFoundException(
-        'No se encontró un inventario para este usuario',
+        'El producto no existe o no pertenece al inventario de este negocio',
       );
+    }
 
-    const product = await this.prisma.product.findUnique({
-      where: { id: productId },
-    });
-
-    if (!product) throw new NotFoundException('Producto no encontrado');
-
-    if (inventory.id !== product.inventoryId)
-      throw new UnauthorizedException(
-        'El producto solicitado no está en tu inventario',
-      );
-
-    return true;
+    // Retornamos el inventoryId para reutilizarlo en la eliminación
+    return inventoryId;
   }
 }

@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Category } from 'generated/prisma/enums';
 
 export class FindProductsDto {
@@ -7,16 +7,20 @@ export class FindProductsDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  page = 1;
+  page: number = 1;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(100)
-  limit = 12;
+  limit: number = 12;
 
   @IsOptional()
-  @IsEnum(Category)
+  @IsEnum(Category, { message: 'La categoría proporcionada no es válida' })
   category?: Category;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
 }

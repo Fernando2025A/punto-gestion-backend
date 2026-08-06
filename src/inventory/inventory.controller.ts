@@ -1,24 +1,40 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, ParseIntPipe, Query } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
-import { type JwtPayload } from 'src/auth/jwt-payload.interface';
 
 @Controller('inventory')
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Get()
-  getResume(@CurrentUser() user: JwtPayload) {
-    return this.inventoryService.getResume(user);
+  getResume(
+    @CurrentUser('id') id: string,
+    @Query('businessId', ParseIntPipe) businessId: number,
+  ) {
+    return this.inventoryService.getResume(id, businessId);
   }
 
   @Get('low-stock')
-  getLowStock(@CurrentUser() user: JwtPayload) {
-    return this.inventoryService.getLowStock(user.id);
+  getLowStock(
+    @CurrentUser('id') id: string,
+    @Query('businessId', ParseIntPipe) businessId: number,
+  ) {
+    return this.inventoryService.getLowStock(id, businessId);
+  }
+
+  @Get('out-stock')
+  getStockOut(
+    @CurrentUser('id') id: string,
+    @Query('businessId', ParseIntPipe) businessId: number,
+  ) {
+    return this.inventoryService.getOutOfStock(id, businessId);
   }
 
   @Get('categories')
-  getCategories(@CurrentUser() user: JwtPayload) {
-    return this.inventoryService.getCategories(user.id);
+  getCategories(
+    @CurrentUser('id') id: string,
+    @Query('businessId', ParseIntPipe) businessId: number,
+  ) {
+    return this.inventoryService.getCategories(id, businessId);
   }
 }

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  InternalServerErrorException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -9,6 +10,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { randomBytes } from 'crypto';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/client';
 
 @Injectable()
 export class AuthService {
@@ -18,38 +20,92 @@ export class AuthService {
   ) {}
 
   async createUser(dto: CreateUserDto) {
-    const existingUser = await this.prisma.user.findFirst({
-      where: {
-        OR: [{ username: dto.username }, { email: dto.email }],
-      },
-    });
-
-    if (existingUser?.username === dto.username) {
-      throw new ConflictException('El nombre de usuario ya está registrado');
-    }
-
-    if (existingUser?.email === dto.email) {
-      throw new ConflictException('El correo ya está registrado');
-    }
-
     const hashedPassword = await bcrypt.hash(dto.password, 10);
-    const newUser = await this.prisma.user.create({
-      data: {
-        password: hashedPassword,
-        username: dto.username,
-        email: dto.email,
-        provider: 'LOCAL',
-        emailVerified: false,
-      },
-    });
 
-    return {
-      id: newUser.id,
-      username: newUser.username,
-      email: newUser.email,
-      emailVerified: newUser.emailVerified,
-      provider: newUser.provider,
-    };
+    try {
+      // Usamos $transaction para asegurar atomicidad (Todo se crea o nada se crea)
+      const result = await this.prisma.$transaction(async (tx) => {
+        // 1. Crear el usuario
+        const newUser = await tx.user.create({
+          data: {
+            username: dto.username,
+            email: dto.email,
+            password: hashedPassword,
+            provider: 'LOCAL',
+            emailVerified: false,
+          },
+          select: {
+            id: true,
+            username: true,
+            email: true,
+            emailVerified: true,
+            provider: true,
+            createdAt: true,
+          },
+        });
+
+        // 2. Crear su negocio por defecto + Inventario + Registro en BusinessEmployee (OWNER)
+        const defaultBusiness = await tx.business.create({
+          data: {
+            name: `Negocio de ${newUser.username}`,
+            ownerId: newUser.id,
+            // Escritura anidada de Prisma: crea el inventario en el mismo query
+            inventory: {
+              create: {},
+            },
+            // Vincula al creador como empleado activo con rol OWNER
+            employees: {
+              create: {
+                userId: newUser.id,
+                role: 'OWNER',
+                isActive: true,
+              },
+            },
+          },
+          select: {
+            id: true,
+            name: true,
+            inventory: {
+              select: { id: true },
+            },
+          },
+        });
+
+        return {
+          user: newUser,
+          defaultBusiness: {
+            id: defaultBusiness.id,
+            name: defaultBusiness.name,
+            inventoryId: defaultBusiness.inventory?.id,
+          },
+        };
+      });
+
+      return result;
+    } catch (error) {
+      // Captura de violaciones de restricción única (P2002)
+      if (
+        error instanceof PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const target = error.meta?.target as string[];
+
+        if (target?.includes('username')) {
+          throw new ConflictException(
+            'El nombre de usuario ya está registrado',
+          );
+        }
+        if (target?.includes('email')) {
+          throw new ConflictException(
+            'El correo electrónico ya está registrado',
+          );
+        }
+
+        throw new ConflictException('El usuario o email ya existe');
+      }
+
+      throw error;
+    }
   }
 
   async validateUser(identifier: string, password: string) {
@@ -310,33 +366,75 @@ export class AuthService {
   }
 
   async createDemoUser() {
-    const userData = {
-      username: `user${Math.floor(Math.random() * 100000)}`,
-      email: `user${Math.floor(Math.random() * 100000)}@demo.com`,
-      password: Math.floor(Math.random() * 1000000).toString(), // Generate a random 6-digit password
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // Expira en 24 horas
-    };
+    // 1. Datos del usuario demo con aleatoriedad más segura (evita colisiones)
+    const randomSuffix = Math.floor(100000 + Math.random() * 900000);
+    const plainPassword = Math.floor(
+      100000 + Math.random() * 900000,
+    ).toString();
 
-    const hashedPassword = await bcrypt.hash(userData.password, 10);
-    const newUser = await this.prisma.user.create({
-      data: {
-        username: userData.username,
-        password: hashedPassword,
-        email: userData.email,
-        isTemporaly: true,
-        expiresAt: userData.expiresAt,
+    const username = `demo_${randomSuffix}`;
+    const email = `demo_${randomSuffix}@demo.com`;
+    const hashedPassword = await bcrypt.hash(plainPassword, 10);
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 horas
+
+    try {
+      // 2. Creación en cascada en una sola transacción
+      const newUser = await this.prisma.user.create({
+        data: {
+          username,
+          email,
+          password: hashedPassword,
+          isTemporaly: true,
+          expiresAt,
+          // Creamos el Negocio de forma anidada
+          ownedBusinesses: {
+            create: {
+              name: `Negocio Demo (${username})`,
+              // Creamos el Inventario del Negocio
+              inventory: {
+                create: {},
+              },
+              // Registramos al usuario como empleado con rol OWNER
+              employees: {
+                create: {
+                  role: 'OWNER',
+                  // El userId se vincula automáticamente al ID del User que se está creando
+                  user: {
+                    connect: { username }, // O Prisma lo deduce mediante la relación
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      // 3. Retornamos las credenciales en texto plano para que el usuario pueda ingresar
+      return {
+        username: newUser.username,
+        password: plainPassword,
+        expiresAt: newUser.expiresAt,
+      };
+    } catch (error) {
+      throw new InternalServerErrorException(
+        'Error al crear el usuario de prueba',
+      );
+    }
+  }
+
+  async getMe(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        username: true,
+        email: true,
+        emailVerified: true,
+        id: true,
+        ownedBusinesses: true,
+        provider: true,
       },
     });
 
-    await this.prisma.inventory.create({
-      data: {
-        userId: newUser.id,
-      },
-    });
-
-    return {
-      username: newUser.username,
-      password: userData.password,
-    };
+    return user;
   }
 }

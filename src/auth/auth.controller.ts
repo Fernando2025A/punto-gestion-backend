@@ -178,7 +178,7 @@ export class AuthController {
     return this.authService.createDemoUser();
   }
   @Get('me')
-  me(@CurrentUser() user: JwtPayload) {
-    return user;
+  me(@CurrentUser('id') id: string) {
+    return this.authService.getMe(id);
   }
 }

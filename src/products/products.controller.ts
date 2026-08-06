@@ -23,56 +23,69 @@ export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   @Post()
-  create(@CurrentUser() user: JwtPayload, @Body() dto: CreateProductDto) {
-    return this.productsService.create(dto, user);
+  create(
+    @CurrentUser('id') id: string,
+    @Body() dto: CreateProductDto,
+    @Query('businessId', ParseIntPipe) businessId: number,
+  ) {
+    return this.productsService.create(dto, id, businessId);
   }
 
-  @Get()
+  @Get('business/:businessId')
   findAll(
     @CurrentUser() user: JwtPayload,
+    @Param('businessId', ParseIntPipe) businessId: number,
     @Query() paginationDto: FindProductsDto,
   ) {
-    return this.productsService.findAll(user, paginationDto);
+    return this.productsService.findAll(user, paginationDto, businessId);
   }
 
   // 🟢 Entrada de stock (ej: PATCH /products/stock-entry)
   @Patch('stock-entry')
   recordStockEntry(
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser('id') id: string,
     @Body() dto: StockEntryDto,
+    @Query('businessId', ParseIntPipe) businessId: number,
   ) {
-    return this.productsService.recordStockEntry(dto, user);
+    return this.productsService.recordStockEntry(dto, id, businessId);
   }
 
   // 🔴 Salida de stock (ej: PATCH /products/stock-exit)
   @Patch('stock-exit')
-  recordStockExit(@CurrentUser() user: JwtPayload, @Body() dto: StockExitDto) {
-    return this.productsService.recordStockExit(dto, user);
+  recordStockExit(
+    @CurrentUser('id') id: string,
+    @Body() dto: StockExitDto,
+    @Query('businessId', ParseIntPipe) businessId: number,
+  ) {
+    return this.productsService.recordStockExit(dto, id, businessId);
   }
 
   // ⚠️ Los endpoints con :id deben ir SIEMPRE al final de las rutas del mismo método HTTP
   @Patch(':id')
   update(
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser('id') id: string,
     @Param('id', ParseIntPipe) productId: number,
     @Body() dto: UpdateProductDto,
+    @Query('businessId', ParseIntPipe) businessId: number,
   ) {
-    return this.productsService.update(dto, user, productId);
+    return this.productsService.update(dto, id, productId, businessId);
   }
 
   @Delete(':id')
   delete(
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser('id') id: string,
     @Param('id', ParseIntPipe) productId: number,
+    @Query('businessId', ParseIntPipe) businessId: number,
   ) {
-    return this.productsService.delete(user, productId);
+    return this.productsService.delete(id, productId, businessId);
   }
 
   @Get(':id')
   findOne(
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser('id') id: string,
     @Param('id', ParseIntPipe) productId: number,
+    @Query('businessId', ParseIntPipe) businessId: number,
   ) {
-    return this.productsService.findOne(user, productId);
+    return this.productsService.findOne(id, productId, businessId);
   }
 }
