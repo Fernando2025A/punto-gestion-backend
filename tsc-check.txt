@@ -1,0 +1,23 @@
+node_modules/@prisma/client-runtime-utils/dist/index.d.ts(4,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@prisma/client-runtime-utils/dist/index.d.ts(10,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@prisma/client-runtime-utils/dist/index.d.ts(325,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@prisma/client-runtime-utils/dist/index.d.ts(355,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+src/auth/auth.service.ts(8,31): error TS2307: Cannot find module 'src/prisma/prisma.service' or its corresponding type declarations.
+src/auth/dto/create-user.dto.ts(4,4): error TS1240: Unable to resolve signature of property decorator when called as an expression.
+  Argument of type 'ClassFieldDecoratorContext<CreateUserDto, string> & { name: "username"; private: false; static: false; }' is not assignable to parameter of type 'string | symbol'.
+src/auth/dto/create-user.dto.ts(5,4): error TS1240: Unable to resolve signature of property decorator when called as an expression.
+  Argument of type 'ClassFieldDecoratorContext<CreateUserDto, string> & { name: "username"; private: false; static: false; }' is not assignable to parameter of type 'string | symbol'.
+src/auth/dto/create-user.dto.ts(6,4): error TS1240: Unable to resolve signature of property decorator when called as an expression.
+  Argument of type 'ClassFieldDecoratorContext<CreateUserDto, string> & { name: "username"; private: false; static: false; }' is not assignable to parameter of type 'string | symbol'.
+src/auth/dto/create-user.dto.ts(9,4): error TS1240: Unable to resolve signature of property decorator when called as an expression.
+  Argument of type 'ClassFieldDecoratorContext<CreateUserDto, string> & { name: "email"; private: false; static: false; }' is not assignable to parameter of type 'string | symbol'.
+src/auth/dto/create-user.dto.ts(10,4): error TS1240: Unable to resolve signature of property decorator when called as an expression.
+  Argument of type 'ClassFieldDecoratorContext<CreateUserDto, string> & { name: "email"; private: false; static: false; }' is not assignable to parameter of type 'string | symbol'.
+src/auth/dto/create-user.dto.ts(11,4): error TS1240: Unable to resolve signature of property decorator when called as an expression.
+  Argument of type 'ClassFieldDecoratorContext<CreateUserDto, string> & { name: "email"; private: false; static: false; }' is not assignable to parameter of type 'string | symbol'.
+src/auth/dto/create-user.dto.ts(14,4): error TS1240: Unable to resolve signature of property decorator when called as an expression.
+  Argument of type 'ClassFieldDecoratorContext<CreateUserDto, string> & { name: "password"; private: false; static: false; }' is not assignable to parameter of type 'string | symbol'.
+src/auth/dto/create-user.dto.ts(15,4): error TS1240: Unable to resolve signature of property decorator when called as an expression.
+  Argument of type 'ClassFieldDecoratorContext<CreateUserDto, string> & { name: "password"; private: false; static: false; }' is not assignable to parameter of type 'string | symbol'.
+src/auth/dto/create-user.dto.ts(16,4): error TS1240: Unable to resolve signature of property decorator when called as an expression.
+  Argument of type 'ClassFieldDecoratorContext<CreateUserDto, string> & { name: "password"; private: false; static: false; }' is not assignable to parameter of type 'string | symbol'.

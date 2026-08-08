@@ -1,6 +1,6 @@
 export interface JwtPayload {
-  id: string;
-  username: string;
+  sub: string;
+  username: string | null;
   email?: string | null;
   emailVerified?: boolean;
   provider?: string;

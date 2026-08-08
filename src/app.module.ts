@@ -8,6 +8,8 @@ import { InventoryModule } from './inventory/inventory.module';
 import { MovementsModule } from './movements/movements.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { BusinessAccessModule } from './business-access/business-access.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -15,9 +17,11 @@ import { ScheduleModule } from '@nestjs/schedule';
     AuthModule,
     ProductsModule,
     InventoryModule,
+    BusinessAccessModule,
     MovementsModule,
     SuppliersModule,
     ScheduleModule.forRoot(),
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -14,22 +14,6 @@ export class InventoryController {
     return this.inventoryService.getResume(id, businessId);
   }
 
-  @Get('low-stock')
-  getLowStock(
-    @CurrentUser('id') id: string,
-    @Query('businessId', ParseIntPipe) businessId: number,
-  ) {
-    return this.inventoryService.getLowStock(id, businessId);
-  }
-
-  @Get('out-stock')
-  getStockOut(
-    @CurrentUser('id') id: string,
-    @Query('businessId', ParseIntPipe) businessId: number,
-  ) {
-    return this.inventoryService.getOutOfStock(id, businessId);
-  }
-
   @Get('categories')
   getCategories(
     @CurrentUser('id') id: string,

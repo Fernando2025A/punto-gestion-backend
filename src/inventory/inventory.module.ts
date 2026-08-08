@@ -8,5 +8,6 @@ import { MovementsModule } from 'src/movements/movements.module';
   controllers: [InventoryController],
   providers: [InventoryService],
   imports: [ProductsModule, MovementsModule],
+  exports: [InventoryService],
 })
 export class InventoryModule {}

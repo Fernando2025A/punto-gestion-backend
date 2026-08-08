@@ -12,7 +12,6 @@ import {
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
-import type { JwtPayload } from 'src/auth/jwt-payload.interface';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { FindProductsDto } from './dto/find-products.dto';
 import { StockEntryDto } from 'src/movements/dto/stock-entry.dto';
@@ -33,11 +32,11 @@ export class ProductsController {
 
   @Get('business/:businessId')
   findAll(
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser('id') userId: string,
     @Param('businessId', ParseIntPipe) businessId: number,
     @Query() paginationDto: FindProductsDto,
   ) {
-    return this.productsService.findAll(user, paginationDto, businessId);
+    return this.productsService.findAll(userId, paginationDto, businessId);
   }
 
   // 🟢 Entrada de stock (ej: PATCH /products/stock-entry)
@@ -80,12 +79,12 @@ export class ProductsController {
     return this.productsService.delete(id, productId, businessId);
   }
 
-  @Get(':id')
+  @Get(':name')
   findOne(
     @CurrentUser('id') id: string,
-    @Param('id', ParseIntPipe) productId: number,
+    @Param('name') productName: string,
     @Query('businessId', ParseIntPipe) businessId: number,
   ) {
-    return this.productsService.findOne(id, productId, businessId);
+    return this.productsService.findOne(id, productName, businessId);
   }
 }

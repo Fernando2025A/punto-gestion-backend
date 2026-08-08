@@ -9,8 +9,10 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
+import type { JwtSignOptions } from '@nestjs/jwt';
 import { randomBytes } from 'crypto';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/client';
+import { JwtPayload } from './jwt-payload.interface';
 
 @Injectable()
 export class AuthService {
@@ -23,8 +25,7 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     try {
-      // Usamos $transaction para asegurar atomicidad (Todo se crea o nada se crea)
-      const result = await this.prisma.$transaction(async (tx) => {
+      return await this.prisma.$transaction(async (tx) => {
         // 1. Crear el usuario
         const newUser = await tx.user.create({
           data: {
@@ -49,11 +50,7 @@ export class AuthService {
           data: {
             name: `Negocio de ${newUser.username}`,
             ownerId: newUser.id,
-            // Escritura anidada de Prisma: crea el inventario en el mismo query
-            inventory: {
-              create: {},
-            },
-            // Vincula al creador como empleado activo con rol OWNER
+            inventory: { create: {} },
             employees: {
               create: {
                 userId: newUser.id,
@@ -65,9 +62,7 @@ export class AuthService {
           select: {
             id: true,
             name: true,
-            inventory: {
-              select: { id: true },
-            },
+            inventory: { select: { id: true } },
           },
         });
 
@@ -80,16 +75,12 @@ export class AuthService {
           },
         };
       });
-
-      return result;
-    } catch (error) {
-      // Captura de violaciones de restricción única (P2002)
+    } catch (error: unknown) {
       if (
         error instanceof PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        const target = error.meta?.target as string[];
-
+        const target = error.meta?.target as string[] | undefined;
         if (target?.includes('username')) {
           throw new ConflictException(
             'El nombre de usuario ya está registrado',
@@ -100,10 +91,8 @@ export class AuthService {
             'El correo electrónico ya está registrado',
           );
         }
-
         throw new ConflictException('El usuario o email ya existe');
       }
-
       throw error;
     }
   }
@@ -115,20 +104,16 @@ export class AuthService {
       },
     });
 
-    if (!user) {
-      return null;
-    }
+    if (!user) return null;
 
     if (!user.password) {
       throw new BadRequestException(
-        'El usuario no tiene contraseña establecida',
+        'El usuario no tiene contraseña establecida (ingresó mediante Google)',
       );
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      return null;
-    }
+    if (!isPasswordValid) return null;
 
     return {
       id: user.id,
@@ -143,9 +128,7 @@ export class AuthService {
     const response = await fetch(
       'https://www.googleapis.com/oauth2/v2/userinfo',
       {
-        headers: {
-          Authorization: `Bearer ${input.accessToken}`,
-        },
+        headers: { Authorization: `Bearer ${input.accessToken}` },
       },
     );
 
@@ -171,9 +154,7 @@ export class AuthService {
   async googleCallback(input: { code: string; redirectUri: string }) {
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         code: input.code,
         client_id: process.env.GOOGLE_CLIENT_ID ?? '',
@@ -206,7 +187,29 @@ export class AuthService {
     isTemporaly?: boolean;
     expiresAt?: Date | null;
   }) {
-    const payload = {
+    // Consultamos los negocios en los que participa el usuario para adjuntarlos en la respuesta
+    const employeeRecords = await this.prisma.businessEmployee.findMany({
+      where: { userId: user.id, isActive: true },
+      select: {
+        role: true,
+        business: {
+          select: {
+            id: true,
+            name: true,
+            inventory: { select: { id: true } },
+          },
+        },
+      },
+    });
+
+    const userBusinesses = employeeRecords.map((emp) => ({
+      id: emp.business.id,
+      name: emp.business.name,
+      role: emp.role,
+      inventoryId: emp.business.inventory?.id,
+    }));
+
+    const payload: JwtPayload = {
       sub: user.id,
       username: user.username,
       email: user.email,
@@ -215,12 +218,10 @@ export class AuthService {
       isTemporaly: user.isTemporaly,
       expiresAt: user.expiresAt,
     };
-    const accessToken = this.jwtService.sign(
-      payload as never,
-      {
-        expiresIn: process.env.JWT_ACCESS_EXPIRES_IN ?? '15m',
-      } as never,
-    );
+
+    const accessToken = this.jwtService.sign(payload, {
+      expiresIn: process.env.JWT_ACCESS_EXPIRES_IN ?? '15m',
+    } as JwtSignOptions);
 
     const refreshTokenValue = randomBytes(32).toString('hex');
     const refreshExpiresIn = Number(
@@ -254,6 +255,7 @@ export class AuthService {
         isTemporaly: user.isTemporaly,
         expiresAt: user.expiresAt,
       },
+      businesses: userBusinesses, // 👈 Ahora el frontend sabe a qué negocios tiene acceso el usuario
     };
   }
 
@@ -272,19 +274,17 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token expirado');
     }
 
-    const payload = {
+    const payload: JwtPayload = {
       sub: storedToken.user.id,
       username: storedToken.user.username,
       email: storedToken.user.email,
       emailVerified: storedToken.user.emailVerified,
       provider: storedToken.user.provider,
     };
-    const accessToken = this.jwtService.sign(
-      payload as never,
-      {
-        expiresIn: process.env.JWT_ACCESS_EXPIRES_IN ?? '15m',
-      } as never,
-    );
+
+    const accessToken = this.jwtService.sign(payload, {
+      expiresIn: process.env.JWT_ACCESS_EXPIRES_IN ?? '15m',
+    } as JwtSignOptions);
 
     return { access_token: accessToken };
   }
@@ -301,8 +301,7 @@ export class AuthService {
 
   validateToken(token: string) {
     try {
-      const payload = this.jwtService.verify(token);
-      return payload;
+      return this.jwtService.verify<JwtPayload>(token);
     } catch {
       throw new UnauthorizedException('Token inválido');
     }
@@ -313,16 +312,37 @@ export class AuthService {
       where: { email: profile.email },
     });
 
+    // Si es un usuario nuevo registrándose con Google, creamos User + Business + Inventory
     if (!user) {
       const baseUsername = this.buildUsername(profile.name ?? profile.email);
       const username = await this.ensureUniqueUsername(baseUsername);
-      user = await this.prisma.user.create({
-        data: {
-          username,
-          email: profile.email,
-          provider: 'GOOGLE',
-          emailVerified: true,
-        },
+
+      user = await this.prisma.$transaction(async (tx) => {
+        const newUser = await tx.user.create({
+          data: {
+            username,
+            email: profile.email,
+            provider: 'GOOGLE',
+            emailVerified: true,
+          },
+        });
+
+        await tx.business.create({
+          data: {
+            name: `Negocio de ${newUser.username}`,
+            ownerId: newUser.id,
+            inventory: { create: {} },
+            employees: {
+              create: {
+                userId: newUser.id,
+                role: 'OWNER',
+                isActive: true,
+              },
+            },
+          },
+        });
+
+        return newUser;
       });
     }
 
@@ -349,12 +369,11 @@ export class AuthService {
       where: { username: sanitized },
     });
 
-    if (!existing) {
-      return sanitized;
-    }
+    if (!existing) return sanitized;
 
     let suffix = 1;
     let candidate = `${sanitized}${suffix}`;
+
     while (
       await this.prisma.user.findUnique({ where: { username: candidate } })
     ) {
@@ -366,56 +385,52 @@ export class AuthService {
   }
 
   async createDemoUser() {
-    // 1. Datos del usuario demo con aleatoriedad más segura (evita colisiones)
     const randomSuffix = Math.floor(100000 + Math.random() * 900000);
     const plainPassword = Math.floor(
       100000 + Math.random() * 900000,
     ).toString();
-
     const username = `demo_${randomSuffix}`;
     const email = `demo_${randomSuffix}@demo.com`;
     const hashedPassword = await bcrypt.hash(plainPassword, 10);
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 horas
 
     try {
-      // 2. Creación en cascada en una sola transacción
-      const newUser = await this.prisma.user.create({
-        data: {
-          username,
-          email,
-          password: hashedPassword,
-          isTemporaly: true,
-          expiresAt,
-          // Creamos el Negocio de forma anidada
-          ownedBusinesses: {
-            create: {
-              name: `Negocio Demo (${username})`,
-              // Creamos el Inventario del Negocio
-              inventory: {
-                create: {},
-              },
-              // Registramos al usuario como empleado con rol OWNER
-              employees: {
-                create: {
-                  role: 'OWNER',
-                  // El userId se vincula automáticamente al ID del User que se está creando
-                  user: {
-                    connect: { username }, // O Prisma lo deduce mediante la relación
-                  },
-                },
+      // Solución limpia de creación atómica sin reconexiones fallidas
+      const newUser = await this.prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            username,
+            email,
+            password: hashedPassword,
+            isTemporaly: true,
+            expiresAt,
+          },
+        });
+
+        await tx.business.create({
+          data: {
+            name: `Negocio Demo (${user.username})`,
+            ownerId: user.id,
+            inventory: { create: {} },
+            employees: {
+              create: {
+                userId: user.id,
+                role: 'OWNER',
+                isActive: true,
               },
             },
           },
-        },
+        });
+
+        return user;
       });
 
-      // 3. Retornamos las credenciales en texto plano para que el usuario pueda ingresar
       return {
         username: newUser.username,
         password: plainPassword,
         expiresAt: newUser.expiresAt,
       };
-    } catch (error) {
+    } catch {
       throw new InternalServerErrorException(
         'Error al crear el usuario de prueba',
       );
@@ -423,18 +438,29 @@ export class AuthService {
   }
 
   async getMe(userId: string) {
-    const user = await this.prisma.user.findUnique({
+    return this.prisma.user.findUnique({
       where: { id: userId },
       select: {
+        id: true,
         username: true,
         email: true,
         emailVerified: true,
-        id: true,
-        ownedBusinesses: true,
         provider: true,
+        ownedBusinesses: true,
+        employments: {
+          where: { isActive: true },
+          select: {
+            role: true,
+            business: {
+              select: {
+                id: true,
+                name: true,
+                inventory: { select: { id: true } },
+              },
+            },
+          },
+        },
       },
     });
-
-    return user;
   }
 }

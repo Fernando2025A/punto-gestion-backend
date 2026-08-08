@@ -3,7 +3,6 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { JwtPayload } from 'src/auth/jwt-payload.interface';
 import { MovementsService } from 'src/movements/movements.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 
