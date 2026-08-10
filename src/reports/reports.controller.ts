@@ -1,7 +1,8 @@
-import { Controller, Get, ParseIntPipe, Query } from '@nestjs/common';
+import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import { InventoryService } from 'src/inventory/inventory.service';
+import { PeriodDto } from './dto/period.dto';
 
 @Controller('reports')
 export class ReportsController {
@@ -48,5 +49,14 @@ export class ReportsController {
     @Query('businessId', ParseIntPipe) businessId: number,
   ) {
     return this.reportsService.getExpiringSoonProducts(businessId, id);
+  }
+
+  @Get('business-resume/:businessId')
+  getBusinessResume(
+    @CurrentUser('id') id: string,
+    @Param('businessId', ParseIntPipe) businessId: number,
+    @Query() periodDto: PeriodDto,
+  ) {
+    return this.reportsService.getBusinessResume(id, businessId, periodDto);
   }
 }

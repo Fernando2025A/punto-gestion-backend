@@ -311,34 +311,48 @@ enum MovementType {
   DELETE_PRODUCT   // Eliminación de producto (opcional)
 }
 
-model MovementHistory {
-  id          Int          @id @default(autoincrement())
+// Enum para tipificar los motivos específicos de la salida/entrada de stock
+enum MovementReason {
+  // Motivos de Salida (STOCK_EXIT)
+  SALE          // Venta de producto
+  WASTE         // Merma / Desperdicio / Vencimiento
+  DAMAGED       // Producto dañado o roto
+  LOSS          // Pérdida / Robo / Faltante de inventario
+  INTERNAL_USE  // Uso interno del negocio
   
-  type        MovementType
-  quantity    Int?         // Cantidad ingresada/retirada (aplica para STOCK_ENTRY y STOCK_EXIT)
-  previousStock Int?       // Stock que había ANTES del movimiento
-  newStock     Int?        // Stock que quedó DESPUÉS del movimiento
-  
-  reason      String?      // Razón o nota opcional (ej: "Ajuste de inventario", "Merma", "Venta #102")
-  details     Json?        // Útil para guardar cambios en edicion (ej: { oldPrice: 10, newPrice: 12 })
+  // Motivos de Entrada (STOCK_ENTRY)
+  PURCHASE      // Compra a proveedor
+  RETURN        // Devolución de cliente
+  ADJUSTMENT    // Ajuste positivo de inventario
+}
 
-  createdAt   DateTime     @default(now())
+model MovementHistory {
+  id            Int            @id @default(autoincrement())
+  
+  type          MovementType
+  reason        MovementReason? // 👈 Ahora es un Enum
+  notes         String?        // 👈 Campo de texto opcional para detalles extras
+
+  quantity      Int?
+  previousStock Int?
+  newStock      Int?
+  details       Json?
+
+  createdAt     DateTime       @default(now())
 
   // Relaciones
-  inventoryId Int
-  inventory   Inventory    @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  inventoryId   Int
+  inventory     Inventory      @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
 
-  // Relación opcional con Product: 
-  // Se deja opcional u omitida por si el producto se elimina en el futuro.
-  productId   Int?
-  product     Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productId     Int?
+  product       Product?       @relation(fields: [productId], references: [id], onDelete: SetNull)
 
-  // Relación con el usuario que ejecutó la acción
-  userId      String?
-  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId        String?
+  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([createdAt])
   @@index([inventoryId, createdAt])
+  @@index([reason])
 }
 
 model Sale {

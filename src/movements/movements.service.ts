@@ -7,7 +7,13 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { StockExitDto } from './dto/stock-exit.dto';
 import { CreateProductDto } from 'src/products/dto/create-product.dto';
-import { Category, MovementType } from 'generated/prisma/enums';
+import {
+  Category,
+  MovementReason,
+  MovementType,
+  PaymentMethod,
+  SaleStatus,
+} from 'generated/prisma/enums';
 import { StockEntryDto } from './dto/stock-entry.dto';
 import { UpdateProductDto } from 'src/products/dto/update-product.dto';
 import { FindMovementsDto } from './dto/find-movements.dto';
@@ -22,12 +28,17 @@ export class MovementsService {
     userId: string,
     inventoryId: number,
   ) {
-    const { productId, quantity, reason } = dto;
+    const { productId, quantity, reason, notes, paymentMethod } = dto;
 
     return await this.prisma.$transaction(async (tx) => {
-      // 1. Obtener producto actual validando que sea de su inventario
+      // 1. Obtener producto e incluir businessId
       const product = await tx.product.findFirst({
         where: { id: productId, inventoryId },
+        include: {
+          inventory: {
+            select: { businessId: true },
+          },
+        },
       });
 
       if (!product) throw new NotFoundException('Producto no encontrado');
@@ -38,27 +49,69 @@ export class MovementsService {
       const previousStock = product.stock;
       const newStock = previousStock - quantity;
 
-      // 2. Actualizar el stock del producto
+      // 2. Descontar el stock
       const updatedProduct = await tx.product.update({
         where: { id: productId },
         data: { stock: newStock },
       });
 
-      // 3. Crear el registro en el historial
-      await tx.movementHistory.create({
+      // 3. Crear el historial con el enum tipificado
+      const movement = await tx.movementHistory.create({
         data: {
           type: MovementType.STOCK_EXIT,
+          reason, // Ej: MovementReason.SALE, MovementReason.WASTE, etc.
+          notes: notes ?? null,
           quantity,
           previousStock,
           newStock,
-          reason,
           inventoryId,
           productId,
           userId,
         },
       });
 
-      return updatedProduct;
+      let sale: any = null;
+
+      // 4. Crear la Venta ÚNICAMENTE si el motivo es VENTA
+      if (reason === MovementReason.SALE) {
+        const businessId = product.inventory.businessId;
+        const unitPrice = Number(product.price);
+        const unitCost = Number(product.purchasePrice);
+        const totalAmount = unitPrice * quantity;
+
+        sale = await tx.sale.create({
+          data: {
+            businessId,
+            userId,
+            subtotal: totalAmount,
+            discount: 0,
+            total: totalAmount,
+            status: SaleStatus.COMPLETED,
+            paymentMethod: paymentMethod ?? PaymentMethod.CASH, // 👈 Se asigna el valor enviado en el DTO o CASH por defecto
+            items: {
+              create: [
+                {
+                  productId: product.id,
+                  productName: product.name,
+                  quantity,
+                  unitPrice,
+                  unitCost,
+                  subtotal: totalAmount,
+                },
+              ],
+            },
+          },
+          include: {
+            items: true,
+          },
+        });
+      }
+
+      return {
+        product: updatedProduct,
+        movement,
+        sale, // Retorna null si fue una pérdida/merma, o el objeto Sale si fue una venta
+      };
     });
   }
 
@@ -72,6 +125,7 @@ export class MovementsService {
         'Los productos de la categoría FOOD requieren una fecha de expiración',
       );
     }
+
     if (dto.supplierId) {
       const supplier = await this.prisma.supplier.findFirst({
         where: { id: dto.supplierId, inventoryId },
@@ -80,7 +134,19 @@ export class MovementsService {
         throw new NotFoundException('El proveedor especificado no existe');
       }
     }
+
     return await this.prisma.$transaction(async (tx) => {
+      // 1. Obtener el inventario para extraer el businessId
+      const inventory = await tx.inventory.findUnique({
+        where: { id: inventoryId },
+        select: { businessId: true },
+      });
+
+      if (!inventory) {
+        throw new NotFoundException('Inventario no encontrado');
+      }
+
+      // 2. Crear el producto
       const product = await tx.product.create({
         data: {
           name: dto.name,
@@ -96,16 +162,47 @@ export class MovementsService {
         },
       });
 
+      // 3. Crear el historial de movimiento
       await tx.movementHistory.create({
         data: {
           type: MovementType.CREATE_PRODUCT,
           productId: product.id,
-          reason: 'Creación inicial de producto',
+          quantity: dto.stock,
+          previousStock: 0,
+          newStock: dto.stock,
           details: `Se añadió un producto de la categoría ${product.category} con un stock inicial de ${product.stock}`,
           inventoryId,
           userId,
         },
       });
+
+      // 4. Si el stock inicial es mayor a 0, registrar la compra/inversión inicial en Purchase
+      if (dto.stock > 0) {
+        const unitCost = Number(dto.purchasePrice);
+        const totalAmount = unitCost * dto.stock;
+
+        await tx.purchase.create({
+          data: {
+            businessId: inventory.businessId,
+            supplierId: dto.supplierId ?? null,
+            userId,
+            subtotal: totalAmount,
+            total: totalAmount,
+            items: {
+              create: [
+                {
+                  productId: product.id,
+                  productName: product.name,
+                  quantity: dto.stock,
+                  unitCost,
+                  subtotal: totalAmount,
+                },
+              ],
+            },
+          },
+        });
+      }
+
       return product;
     });
   }
@@ -143,7 +240,7 @@ export class MovementsService {
           quantity,
           previousStock,
           newStock,
-          reason: reason || 'Ingreso de stock',
+          reason: reason ?? 'Ingreso de stock',
           inventoryId,
           productId: product.id,
           userId,
@@ -208,7 +305,6 @@ export class MovementsService {
           quantity: null,
           previousStock: currentProduct.stock,
           newStock: updatedProduct.stock,
-          reason: 'Edición de información del producto',
           details: changes, // 👈 Guardamos el objeto con las diferencias
           inventoryId,
           productId,
@@ -238,7 +334,6 @@ export class MovementsService {
           type: MovementType.DELETE_PRODUCT,
           previousStock: product.stock,
           newStock: 0,
-          reason: 'Producto eliminado del sistema',
           details: {
             deletedProductName: product.name,
             deletedProductCategory: product.category,

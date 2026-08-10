@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { Permission } from 'generated/prisma/enums';
+import { Permission, SaleStatus } from 'generated/prisma/enums';
 import { BusinessAccessService } from 'src/business-access/business-access.service';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { PeriodDto } from './dto/period.dto';
 
 @Injectable()
 export class ReportsService {
@@ -122,6 +123,159 @@ export class ReportsService {
       grossProfit,
       totalExpenses,
       netProfit: grossProfit - totalExpenses,
+    };
+  }
+
+  async getBusinessResume(userId: string, businessId: number, dto: PeriodDto) {
+    // 1. Validar acceso del usuario al negocio
+    await this.businessAccess.getInventory(
+      businessId,
+      userId,
+      Permission.VIEW_REPORTS,
+    );
+
+    const { startDate, endDate } = dto;
+
+    const dateFilter = {
+      gte: startDate,
+      lte: endDate,
+    };
+
+    // 2. Ejecutar consultas en paralelo (Resúmenes globales + Listados para el gráfico)
+    const [
+      salesAggregate,
+      salesItems,
+      purchasesAggregate,
+      expensesAggregate,
+      salesList,
+      purchasesList,
+      expensesList,
+    ] = await Promise.all([
+      // Aggregates globales
+      this.prisma.sale.aggregate({
+        where: {
+          businessId,
+          status: SaleStatus.COMPLETED,
+          occurredAt: dateFilter,
+        },
+        _sum: { total: true },
+        _count: { id: true },
+      }),
+      this.prisma.saleItem.findMany({
+        where: {
+          sale: {
+            businessId,
+            status: SaleStatus.COMPLETED,
+            occurredAt: dateFilter,
+          },
+        },
+        select: { quantity: true, unitCost: true },
+      }),
+      this.prisma.purchase.aggregate({
+        where: { businessId, occurredAt: dateFilter },
+        _sum: { total: true },
+      }),
+      this.prisma.expense.aggregate({
+        where: { businessId, occurredAt: dateFilter },
+        _sum: { amount: true },
+      }),
+
+      // Consultas detalladas para agrupar por día en el gráfico
+      this.prisma.sale.findMany({
+        where: {
+          businessId,
+          status: SaleStatus.COMPLETED,
+          occurredAt: dateFilter,
+        },
+        select: { occurredAt: true, total: true },
+      }),
+      this.prisma.purchase.findMany({
+        where: { businessId, occurredAt: dateFilter },
+        select: { occurredAt: true, total: true },
+      }),
+      this.prisma.expense.findMany({
+        where: { businessId, occurredAt: dateFilter },
+        select: { occurredAt: true, amount: true },
+      }),
+    ]);
+
+    // 3. Totales generales
+    const totalSales = Number(salesAggregate._sum.total ?? 0);
+    const totalPurchases = Number(purchasesAggregate._sum.total ?? 0);
+    const totalExpenses = Number(expensesAggregate._sum.amount ?? 0);
+
+    const costOfGoodsSold = salesItems.reduce((acc, item) => {
+      return acc + item.quantity * Number(item.unitCost);
+    }, 0);
+
+    const totalOutflows = totalPurchases + totalExpenses;
+    const grossProfit = totalSales - costOfGoodsSold;
+    const netProfit = totalSales - totalOutflows;
+
+    // 4. Construcción del arreglo 'chart' agrupado día a día
+    const dailyMap = new Map<string, { income: number; expenses: number }>();
+
+    // Inicializar todos los días del rango en el Mapa (para evitar saltos de fechas en el frontend)
+    const currentDate = new Date(startDate);
+    const lastDate = new Date(endDate);
+
+    while (currentDate <= lastDate) {
+      const dateKey = currentDate.toISOString().split('T')[0];
+      dailyMap.set(dateKey, { income: 0, expenses: 0 });
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    // Acumular Ingresos (Ventas) por fecha
+    for (const sale of salesList) {
+      const dateKey = new Date(sale.occurredAt).toISOString().split('T')[0];
+      if (dailyMap.has(dateKey)) {
+        const day = dailyMap.get(dateKey)!;
+        day.income += Number(sale.total);
+      }
+    }
+
+    // Acumular Egresos (Compras de stock) por fecha
+    for (const purchase of purchasesList) {
+      const dateKey = new Date(purchase.occurredAt).toISOString().split('T')[0];
+      if (dailyMap.has(dateKey)) {
+        const day = dailyMap.get(dateKey)!;
+        day.expenses += Number(purchase.total);
+      }
+    }
+
+    // Acumular Egresos (Gastos operativos) por fecha
+    for (const expense of expensesList) {
+      const dateKey = new Date(expense.occurredAt).toISOString().split('T')[0];
+      if (dailyMap.has(dateKey)) {
+        const day = dailyMap.get(dateKey)!;
+        day.expenses += Number(expense.amount);
+      }
+    }
+
+    // Convertir el Mapa a un arreglo formateado
+    const chart = Array.from(dailyMap.entries()).map(([date, values]) => ({
+      date,
+      income: values.income,
+      expenses: values.expenses,
+    }));
+
+    // 5. Estructura final de respuesta
+    return {
+      period: {
+        startDate,
+        endDate,
+      },
+      summary: {
+        totalSales,
+        totalPurchases,
+        totalExpenses,
+        totalOutflows,
+        costOfGoodsSold,
+        grossProfit,
+        netProfit,
+        salesCount: salesAggregate._count.id,
+      },
+      chart,
     };
   }
 }
