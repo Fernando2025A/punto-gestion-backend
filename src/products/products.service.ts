@@ -11,7 +11,7 @@ import { MovementsService } from 'src/movements/movements.service';
 import { StockExitDto } from 'src/movements/dto/stock-exit.dto';
 import { StockEntryDto } from 'src/movements/dto/stock-entry.dto';
 import { SuppliersService } from 'src/suppliers/suppliers.service';
-import { BusinessAccessService } from 'src/business-access/business-access.service';
+import { BusinessAccessService } from 'src/business/business-access/business-access.service';
 import { Category } from 'generated/prisma/enums';
 import { Prisma } from 'generated/prisma/client';
 
@@ -38,10 +38,14 @@ export class ProductsService {
   }
 
   async create(dto: CreateProductDto, userId: string, businessId: number) {
-    const inventory = await this.businessAccess.getInventory(
-      businessId,
-      userId,
-    );
+    const inventory = await this.prisma.inventory.findUnique({
+      where: { businessId },
+      select: { id: true },
+    });
+
+    if (!inventory) {
+      throw new NotFoundException('El inventario de este negocio no existe');
+    }
     return this.movements.createProduct(dto, userId, inventory.id);
   }
 
@@ -50,27 +54,39 @@ export class ProductsService {
     userId: string,
     businessId: number,
   ) {
-    const inventory = await this.businessAccess.getInventory(
-      businessId,
-      userId,
-    );
+    const inventory = await this.prisma.inventory.findUnique({
+      where: { businessId },
+      select: { id: true },
+    });
+
+    if (!inventory) {
+      throw new NotFoundException('El inventario de este negocio no existe');
+    }
     return this.movements.recordStockEntry(dto, userId, inventory.id);
   }
 
   async recordStockExit(dto: StockExitDto, userId: string, businessId: number) {
-    const inventory = await this.businessAccess.getInventory(
-      businessId,
-      userId,
-    );
+    const inventory = await this.prisma.inventory.findUnique({
+      where: { businessId },
+      select: { id: true },
+    });
+
+    if (!inventory) {
+      throw new NotFoundException('El inventario de este negocio no existe');
+    }
     return this.movements.recordStockExit(dto, userId, inventory.id);
   }
 
   async findAll(userId: string, dto: FindProductsDto, businessId: number) {
     const { page = 1, limit = 10, category, search } = dto;
-    const inventory = await this.businessAccess.getInventory(
-      businessId,
-      userId,
-    );
+    const inventory = await this.prisma.inventory.findUnique({
+      where: { businessId },
+      select: { id: true },
+    });
+
+    if (!inventory) {
+      throw new NotFoundException('El inventario de este negocio no existe');
+    }
 
     const skip = (page - 1) * limit;
 
@@ -111,10 +127,14 @@ export class ProductsService {
   }
 
   async findOne(userId: string, productName: string, businessId: number) {
-    const inventory = await this.businessAccess.getInventory(
-      businessId,
-      userId,
-    );
+    const inventory = await this.prisma.inventory.findUnique({
+      where: { businessId },
+      select: { id: true },
+    });
+
+    if (!inventory) {
+      throw new NotFoundException('El inventario de este negocio no existe');
+    }
 
     const product = await this.prisma.product.findFirst({
       where: {
@@ -143,10 +163,14 @@ export class ProductsService {
     productId: number,
     businessId: number,
   ) {
-    const inventory = await this.businessAccess.getInventory(
-      businessId,
-      userId,
-    );
+    const inventory = await this.prisma.inventory.findUnique({
+      where: { businessId },
+      select: { id: true },
+    });
+
+    if (!inventory) {
+      throw new NotFoundException('El inventario de este negocio no existe');
+    }
 
     const existingProduct = await this.prisma.product.findFirst({
       where: {
@@ -185,10 +209,14 @@ export class ProductsService {
 
   async delete(userId: string, productId: number, businessId: number) {
     // 1. Obtenemos el inventario solo una vez
-    const inventory = await this.businessAccess.getInventory(
-      businessId,
-      userId,
-    );
+    const inventory = await this.prisma.inventory.findUnique({
+      where: { businessId },
+      select: { id: true },
+    });
+
+    if (!inventory) {
+      throw new NotFoundException('El inventario de este negocio no existe');
+    }
 
     // 2. Validamos existencia rápida mediante un select liviano sin traer todo el producto
     const productExists = await this.prisma.product.findFirst({

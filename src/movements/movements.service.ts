@@ -153,6 +153,7 @@ export class MovementsService {
           price: dto.price,
           purchasePrice: dto.purchasePrice,
           stock: dto.stock,
+          minimumStock: dto.minimumStock,
           category: dto.category,
           supplierId: dto.supplierId,
           expirationDate: dto.expirationDate
@@ -212,7 +213,7 @@ export class MovementsService {
     userId: string,
     inventoryId: number,
   ) {
-    const { productId, quantity, reason } = dto;
+    const { productId, quantity, notes } = dto;
 
     return await this.prisma.$transaction(async (tx) => {
       // 1. Buscar el producto validando el inventario
@@ -240,7 +241,7 @@ export class MovementsService {
           quantity,
           previousStock,
           newStock,
-          reason: reason ?? 'Ingreso de stock',
+          notes: notes ?? 'Ingreso de stock',
           inventoryId,
           productId: product.id,
           userId,

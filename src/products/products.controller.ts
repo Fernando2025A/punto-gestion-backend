@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -16,12 +17,17 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { FindProductsDto } from './dto/find-products.dto';
 import { StockEntryDto } from 'src/movements/dto/stock-entry.dto';
 import { StockExitDto } from 'src/movements/dto/stock-exit.dto';
+import { Permissions } from 'src/auth/decorators/permission.decorator';
+import { Permission } from 'generated/prisma/enums';
+import { PermissionsGuard } from 'src/auth/guards/permission.guard';
 
 @Controller('products')
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   @Post()
+  @Permissions(Permission.CREATE_PRODUCT)
+  @UseGuards(PermissionsGuard)
   create(
     @CurrentUser('id') id: string,
     @Body() dto: CreateProductDto,

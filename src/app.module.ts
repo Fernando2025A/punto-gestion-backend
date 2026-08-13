@@ -8,8 +8,11 @@ import { InventoryModule } from './inventory/inventory.module';
 import { MovementsModule } from './movements/movements.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { ScheduleModule } from '@nestjs/schedule';
-import { BusinessAccessModule } from './business-access/business-access.module';
+import { BusinessAccessModule } from './business/business-access/business-access.module';
 import { ReportsModule } from './reports/reports.module';
+import { BusinessInvitesModule } from './business/business-invites/business-invites.module';
+import { BusinessEmployeesModule } from './business/business-employees/business-employees.module';
+import { BusinessModule } from './business/business.module';
 
 @Module({
   imports: [
@@ -22,6 +25,9 @@ import { ReportsModule } from './reports/reports.module';
     SuppliersModule,
     ScheduleModule.forRoot(),
     ReportsModule,
+    BusinessInvitesModule,
+    BusinessEmployeesModule,
+    BusinessModule,
   ],
   controllers: [AppController],
   providers: [AppService],

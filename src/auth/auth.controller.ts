@@ -14,7 +14,6 @@ import { AuthService } from './auth.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
-import type { JwtPayload } from './jwt-payload.interface';
 import { LoggerDto } from './dto/logger.dto';
 import { AuthGuard } from '@nestjs/passport';
 

@@ -1,9 +1,21 @@
-import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ReportsService } from './reports.service';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import { InventoryService } from 'src/inventory/inventory.service';
 import { PeriodDto } from './dto/period.dto';
+import { Permissions } from 'src/auth/decorators/permission.decorator';
+import { Permission } from 'generated/prisma/enums';
+import { PermissionsGuard } from 'src/auth/guards/permission.guard';
 
+@Permissions(Permission.VIEW_REPORTS)
+@UseGuards(PermissionsGuard)
 @Controller('reports')
 export class ReportsController {
   constructor(
@@ -49,6 +61,14 @@ export class ReportsController {
     @Query('businessId', ParseIntPipe) businessId: number,
   ) {
     return this.reportsService.getExpiringSoonProducts(businessId, id);
+  }
+
+  @Get('resume')
+  getResume(
+    @CurrentUser('id') id: string,
+    @Query('businessId', ParseIntPipe) businessId: number,
+  ) {
+    return this.reportsService.getKPIOverview(businessId, id);
   }
 
   @Get('business-resume/:businessId')

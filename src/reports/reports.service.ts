@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Permission, SaleStatus } from 'generated/prisma/enums';
-import { BusinessAccessService } from 'src/business-access/business-access.service';
+import { BusinessAccessService } from 'src/business/business-access/business-access.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { PeriodDto } from './dto/period.dto';
 
@@ -18,7 +18,6 @@ export class ReportsService {
     const inventory = await this.businessAccess.getInventory(
       businessId,
       userId,
-      Permission.VIEW_REPORTS,
     );
 
     const now = new Date();
@@ -44,7 +43,6 @@ export class ReportsService {
     const inventory = await this.businessAccess.getInventory(
       businessId,
       userId,
-      Permission.VIEW_REPORTS,
     );
 
     const sixtyDaysAgo = new Date();
@@ -69,11 +67,7 @@ export class ReportsService {
   // 5. Ganancias del Mes Actual
   async getCurrentMonthProfits(businessId: number, userId: string) {
     // Valida acceso a través de BusinessAccessService
-    await this.businessAccess.getInventory(
-      businessId,
-      userId,
-      Permission.VIEW_FINANCIAL_SUMMARY,
-    );
+    await this.businessAccess.getInventory(businessId, userId);
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -128,11 +122,7 @@ export class ReportsService {
 
   async getBusinessResume(userId: string, businessId: number, dto: PeriodDto) {
     // 1. Validar acceso del usuario al negocio
-    await this.businessAccess.getInventory(
-      businessId,
-      userId,
-      Permission.VIEW_REPORTS,
-    );
+    await this.businessAccess.getInventory(businessId, userId);
 
     const { startDate, endDate } = dto;
 
@@ -276,6 +266,152 @@ export class ReportsService {
         salesCount: salesAggregate._count.id,
       },
       chart,
+    };
+  }
+
+  async getKPIOverview(businessId: number, userId: string) {
+    // 1. Validar permisos
+    const inventory = await this.businessAccess.getInventory(
+      businessId,
+      userId,
+    );
+
+    // Fechas de control
+    const now = new Date();
+
+    // Próximos a vencer (30 días adelante)
+    const futureDate = new Date();
+    futureDate.setDate(now.getDate() + 30);
+
+    // Poca rotación (60 días atrás)
+    const sixtyDaysAgo = new Date();
+    sixtyDaysAgo.setDate(now.getDate() - 60);
+
+    // Rango del mes actual para las ganancias
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+    );
+
+    // 2. Consultas concurrentes en paralelo
+    const [
+      outOfStockCount,
+      lowStockCount,
+      expiringSoonCount,
+      lowRotationCount,
+      salesAggregate,
+      salesItems,
+      expensesAggregate,
+    ] = await Promise.all([
+      // A. Sin Stock (stock = 0)
+      this.prisma.product.count({
+        where: {
+          inventoryId: inventory.id,
+          stock: 0,
+        },
+      }),
+
+      // B. Stock Bajo (stock > 0 y stock <= minStock)
+      this.prisma.product.count({
+        where: {
+          inventoryId: inventory.id,
+          stock: {
+            gt: 0,
+            lte: this.prisma.product.fields.minimumStock, // Compara stock actual contra el stock mínimo del producto
+          },
+        },
+      }),
+
+      // C. Próximos a vencer (entre hoy y 30 días)
+      this.prisma.product.count({
+        where: {
+          inventoryId: inventory.id,
+          expirationDate: {
+            gte: now,
+            lte: futureDate,
+          },
+        },
+      }),
+
+      // D. Poca rotación (sin ventas en los últimos 60 días)
+      this.prisma.product.count({
+        where: {
+          inventoryId: inventory.id,
+          saleItems: {
+            none: {
+              sale: {
+                businessId,
+                occurredAt: { gte: sixtyDaysAgo },
+                status: SaleStatus.COMPLETED,
+              },
+            },
+          },
+        },
+      }),
+
+      // E. Total Ingresos por Ventas del mes
+      this.prisma.sale.aggregate({
+        where: {
+          businessId,
+          status: SaleStatus.COMPLETED,
+          occurredAt: { gte: startOfMonth, lte: endOfMonth },
+        },
+        _sum: { total: true },
+      }),
+
+      // F. Costos de los productos vendidos en el mes (COGS)
+      this.prisma.saleItem.findMany({
+        where: {
+          sale: {
+            businessId,
+            status: SaleStatus.COMPLETED,
+            occurredAt: { gte: startOfMonth, lte: endOfMonth },
+          },
+        },
+        select: { quantity: true, unitCost: true },
+      }),
+
+      // G. Total Gastos del mes
+      this.prisma.expense.aggregate({
+        where: {
+          businessId,
+          occurredAt: { gte: startOfMonth, lte: endOfMonth },
+        },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    // 3. Cálculos financieros del mes actual
+    const totalRevenue = Number(salesAggregate._sum.total ?? 0);
+    const totalExpenses = Number(expensesAggregate._sum.amount ?? 0);
+
+    const costOfGoodsSold = salesItems.reduce(
+      (acc, item) => acc + item.quantity * Number(item.unitCost),
+      0,
+    );
+
+    const grossProfit = totalRevenue - costOfGoodsSold;
+    const netProfit = grossProfit - totalExpenses;
+
+    // 4. Retorno consolidado de métricas
+    return {
+      outOfStockCount,
+      lowStockCount,
+      expiringSoonCount,
+      lowRotationCount,
+      currentMonthProfits: {
+        period: { start: startOfMonth, end: endOfMonth },
+        totalRevenue,
+        costOfGoodsSold,
+        grossProfit,
+        totalExpenses,
+        netProfit,
+      },
     };
   }
 }

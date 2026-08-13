@@ -22,12 +22,6 @@ export class StockEntryDto {
   @Type(() => Number)
   quantity: number;
 
-  @IsNotEmpty({ message: 'El motivo es obligatorio' })
-  @IsEnum(MovementReason, {
-    message: 'El motivo debe ser un valor válido (ej. PURCHASE, RETURN, ADJUSTMENT)',
-  })
-  reason: MovementReason;
-
   @IsOptional()
   @IsString({ message: 'Las notas deben ser una cadena de texto' })
   notes?: string;
