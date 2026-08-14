@@ -5,6 +5,9 @@ import {
   Query,
   ParseIntPipe,
   UseGuards,
+  Get,
+  Delete,
+  Param,
 } from '@nestjs/common';
 import { BusinessInvitesService } from './business-invites.service';
 import { CreateInviteDto } from './dto/create-invite.dto';
@@ -33,5 +36,22 @@ export class BusinessInvitesController {
   @Post('join')
   joinBusiness(@CurrentUser('id') userId: string, @Body('code') code: string) {
     return this.invitesService.joinBusinessByCode(userId, code);
+  }
+
+  @Get()
+  @Permissions(Permission.VIEW_INVITATIONS)
+  @UseGuards(PermissionsGuard)
+  getActiveInvites(@Query('businessId', ParseIntPipe) businessId: number) {
+    return this.invitesService.getActiveInvites(businessId);
+  }
+
+  @Delete(':id')
+  @Permissions(Permission.DELETE_INVITATIONS)
+  @UseGuards(PermissionsGuard)
+  removeInvite(
+    @Param('id', ParseIntPipe) inviteId: number,
+    @Query('businessId', ParseIntPipe) businessId: number,
+  ) {
+    return this.invitesService.removeInvite(inviteId, businessId);
   }
 }

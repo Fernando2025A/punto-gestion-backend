@@ -31,17 +31,21 @@ export class PermissionsGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const user = request.user; // Inyectado por JwtAuthGuard
 
-    // Extraer businessId (Soporta QueryParams, RouteParams o Body)
+    // ✅ EXTRAER BUSINESS ID CON OPTIONAL CHAINING (Evita el 500 en GET)
     const rawBusinessId =
-      request.query.businessId ||
-      request.params.businessId ||
-      request.body.businessId;
+      request.query?.businessId ??
+      request.params?.businessId ??
+      request.body?.businessId;
 
     if (!rawBusinessId) {
       throw new BadRequestException('Se requiere especificar el businessId');
     }
 
     const businessId = Number(rawBusinessId);
+
+    if (isNaN(businessId)) {
+      throw new BadRequestException('El businessId debe ser un número válido');
+    }
 
     // 1. Obtener acceso mediante el servicio centralizado
     const access = await this.businessAccess.getAccess(user.id, businessId);

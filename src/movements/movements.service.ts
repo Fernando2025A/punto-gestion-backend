@@ -499,7 +499,12 @@ export class MovementsService {
     }));
   }
 
-  async getStockEntry(userId: string, dto: FindStockDto) {
+  async getStockEntry(userId: string, businessId: number, dto: FindStockDto) {
+    const inventory = await this.prisma.inventory.findFirst({
+      where: { business: { id: businessId } },
+    });
+
+    if (!inventory) throw new NotFoundException('No se encontró inventario');
     const { page, limit } = dto;
 
     const skip = (page - 1) * limit;
@@ -508,6 +513,7 @@ export class MovementsService {
       this.prisma.movementHistory.findMany({
         where: {
           userId,
+          inventoryId: inventory.id,
           type: 'STOCK_ENTRY',
         },
         skip,
@@ -530,7 +536,12 @@ export class MovementsService {
     };
   }
 
-  async getStockExit(userId: string, dto: FindStockDto) {
+  async getStockExit(userId: string, businessId: number, dto: FindStockDto) {
+    const inventory = await this.prisma.inventory.findFirst({
+      where: { business: { id: businessId } },
+    });
+
+    if (!inventory) throw new NotFoundException('No se encontró inventario');
     const { page, limit } = dto;
 
     const skip = (page - 1) * limit;
@@ -561,13 +572,22 @@ export class MovementsService {
     };
   }
 
-  async getMovements(userId: string, dto: FindMovementsDto) {
+  async getMovements(
+    userId: string,
+    businessId: number,
+    dto: FindMovementsDto,
+  ) {
+    const inventory = await this.prisma.inventory.findFirst({
+      where: { business: { id: businessId } },
+    });
+    if (!inventory) throw new NotFoundException('No se encontró inventario');
     const { page, limit, movementType } = dto;
 
     const skip = (page - 1) * limit;
 
     const where = {
       userId: userId,
+      inventoryId: inventory.id,
       ...(movementType && { type: movementType }),
     };
 

@@ -1,8 +1,11 @@
-import { IsEnum, IsInt, Min, IsOptional } from 'class-validator';
+import { IsEnum, IsInt, Min, IsOptional, NotEquals } from 'class-validator';
 import { EmployeeRole } from 'generated/prisma/enums';
 
 export class CreateInviteDto {
   @IsEnum(EmployeeRole)
+  @NotEquals(EmployeeRole.OWNER, {
+    message: 'No es posible crear invitaciones para el rol OWNER',
+  })
   role: EmployeeRole;
 
   @IsInt()

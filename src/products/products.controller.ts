@@ -21,13 +21,13 @@ import { Permissions } from 'src/auth/decorators/permission.decorator';
 import { Permission } from 'generated/prisma/enums';
 import { PermissionsGuard } from 'src/auth/guards/permission.guard';
 
+@UseGuards(PermissionsGuard)
 @Controller('products')
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
-  @Post()
   @Permissions(Permission.CREATE_PRODUCT)
-  @UseGuards(PermissionsGuard)
+  @Post()
   create(
     @CurrentUser('id') id: string,
     @Body() dto: CreateProductDto,
@@ -36,6 +36,7 @@ export class ProductsController {
     return this.productsService.create(dto, id, businessId);
   }
 
+  @Permissions(Permission.VIEW_PRODUCT)
   @Get('business/:businessId')
   findAll(
     @CurrentUser('id') userId: string,
@@ -46,6 +47,7 @@ export class ProductsController {
   }
 
   // 🟢 Entrada de stock (ej: PATCH /products/stock-entry)
+  @Permissions(Permission.REGISTER_STOCK_ENTRY)
   @Patch('stock-entry')
   recordStockEntry(
     @CurrentUser('id') id: string,
@@ -56,6 +58,7 @@ export class ProductsController {
   }
 
   // 🔴 Salida de stock (ej: PATCH /products/stock-exit)
+  @Permissions(Permission.REGISTER_STOCK_EXIT)
   @Patch('stock-exit')
   recordStockExit(
     @CurrentUser('id') id: string,
@@ -65,17 +68,7 @@ export class ProductsController {
     return this.productsService.recordStockExit(dto, id, businessId);
   }
 
-  // ⚠️ Los endpoints con :id deben ir SIEMPRE al final de las rutas del mismo método HTTP
-  @Patch(':id')
-  update(
-    @CurrentUser('id') id: string,
-    @Param('id', ParseIntPipe) productId: number,
-    @Body() dto: UpdateProductDto,
-    @Query('businessId', ParseIntPipe) businessId: number,
-  ) {
-    return this.productsService.update(dto, id, productId, businessId);
-  }
-
+  @Permissions(Permission.DELETE_PRODUCT)
   @Delete(':id')
   delete(
     @CurrentUser('id') id: string,
@@ -85,6 +78,7 @@ export class ProductsController {
     return this.productsService.delete(id, productId, businessId);
   }
 
+  @Permissions(Permission.VIEW_PRODUCT)
   @Get(':name')
   findOne(
     @CurrentUser('id') id: string,
@@ -92,5 +86,17 @@ export class ProductsController {
     @Query('businessId', ParseIntPipe) businessId: number,
   ) {
     return this.productsService.findOne(id, productName, businessId);
+  }
+
+  // ⚠️ Los endpoints con :id deben ir SIEMPRE al final de las rutas del mismo método HTTP
+  @Permissions(Permission.UPDATE_PRODUCT)
+  @Patch(':id')
+  update(
+    @CurrentUser('id') id: string,
+    @Param('id', ParseIntPipe) productId: number,
+    @Body() dto: UpdateProductDto,
+    @Query('businessId', ParseIntPipe) businessId: number,
+  ) {
+    return this.productsService.update(dto, id, productId, businessId);
   }
 }

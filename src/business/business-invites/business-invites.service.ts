@@ -138,4 +138,47 @@ export class BusinessInvitesService {
         return [Permission.VIEW_PRODUCT, Permission.VIEW_CATEGORIES];
     }
   }
+
+  // 3. Obtener Invitaciones Activas de un Negocio
+  async getActiveInvites(businessId: number) {
+    return this.prisma.businessInvite.findMany({
+      where: {
+        businessId,
+        expiresAt: {
+          gt: new Date(), // La fecha de expiración es mayor a la hora actual
+        },
+        usedCount: {
+          lt: this.prisma.businessInvite.fields.maxUses, // Aún no ha alcanzado el número máximo de usos
+        },
+      },
+      include: {
+        createdBy: {
+          select: {
+            id: true,
+            username: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
+
+  // 4. Eliminar / Revocar una invitación por ID
+  async removeInvite(inviteId: number, businessId: number) {
+    // Verificamos que la invitación exista y pertenezca al negocio actual
+    const invite = await this.prisma.businessInvite.findUnique({
+      where: { id: inviteId },
+    });
+
+    if (!invite || invite.businessId !== businessId) {
+      throw new NotFoundException('La invitación no existe en este negocio');
+    }
+
+    return this.prisma.businessInvite.delete({
+      where: { id: inviteId },
+    });
+  }
 }

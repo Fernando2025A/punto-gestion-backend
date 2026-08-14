@@ -244,9 +244,9 @@ model Inventory {
 }
 
 model Product {
-  id            Int            @id @default(autoincrement())
+  id            Int           @id @default(autoincrement())
   name          String
-  price         Decimal        @db.Decimal(10,2)
+  price         Decimal       @db.Decimal(10,2)
   purchasePrice Decimal       @db.Decimal(10,2)
   stock         Int
   minimumStock  Int?
