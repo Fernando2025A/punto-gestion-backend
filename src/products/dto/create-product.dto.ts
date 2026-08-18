@@ -49,4 +49,8 @@ export class CreateProductDto {
   @IsOptional()
   @IsDateString() // Valida formato YYYY-MM-DD o ISO8601
   expirationDate?: string;
+
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
 }

@@ -8,7 +8,9 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -20,19 +22,33 @@ import { StockExitDto } from 'src/movements/dto/stock-exit.dto';
 import { Permissions } from 'src/auth/decorators/permission.decorator';
 import { Permission } from 'generated/prisma/enums';
 import { PermissionsGuard } from 'src/auth/guards/permission.guard';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
+import { BulkStockExitDto } from 'src/movements/dto/bulk-stock-exit.dto';
+import { BulkStockEntryDto } from 'src/movements/dto/bulk-stock-entry.dto';
 
 @UseGuards(PermissionsGuard)
 @Controller('products')
 export class ProductsController {
-  constructor(private readonly productsService: ProductsService) {}
+  constructor(
+    private readonly productsService: ProductsService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
 
   @Permissions(Permission.CREATE_PRODUCT)
   @Post()
-  create(
+  @UseInterceptors(FileInterceptor('file')) // 👈 Intercepta la imagen enviada con la key 'file'
+  async create(
     @CurrentUser('id') id: string,
     @Body() dto: CreateProductDto,
     @Query('businessId', ParseIntPipe) businessId: number,
+    @UploadedFile() file?: Express.Multer.File, // 👈 Recibimos el archivo opcional
   ) {
+    if (file) {
+      const uploadResult = await this.cloudinaryService.uploadFile(file);
+      dto.imageUrl = uploadResult.secure_url;
+    }
+
     return this.productsService.create(dto, id, businessId);
   }
 
@@ -57,6 +73,16 @@ export class ProductsController {
     return this.productsService.recordStockEntry(dto, id, businessId);
   }
 
+  @Permissions(Permission.REGISTER_STOCK_ENTRY)
+  @Patch('stock-entry/bulk/:businessId')
+  async recordBulkStockEntry(
+    @Param('businessId', ParseIntPipe) businessId: number,
+    @CurrentUser('id') userId: string,
+    @Body() dto: BulkStockEntryDto,
+  ) {
+    return await this.productsService.bulkStockEntry(dto, userId, businessId);
+  }
+
   // 🔴 Salida de stock (ej: PATCH /products/stock-exit)
   @Permissions(Permission.REGISTER_STOCK_EXIT)
   @Patch('stock-exit')
@@ -66,6 +92,16 @@ export class ProductsController {
     @Query('businessId', ParseIntPipe) businessId: number,
   ) {
     return this.productsService.recordStockExit(dto, id, businessId);
+  }
+
+  @Permissions(Permission.REGISTER_STOCK_EXIT)
+  @Patch('stock-exit/bulk/:businessId')
+  async recordBulkStockExit(
+    @Param('businessId', ParseIntPipe) businessId: number,
+    @CurrentUser('id') userId: string,
+    @Body() dto: BulkStockExitDto,
+  ) {
+    return await this.productsService.bulkStockExit(dto, userId, businessId);
   }
 
   @Permissions(Permission.DELETE_PRODUCT)
@@ -91,12 +127,19 @@ export class ProductsController {
   // ⚠️ Los endpoints con :id deben ir SIEMPRE al final de las rutas del mismo método HTTP
   @Permissions(Permission.UPDATE_PRODUCT)
   @Patch(':id')
-  update(
+  @UseInterceptors(FileInterceptor('file')) // 👈 Intercepta la imagen enviada con la key 'file'
+  async update(
     @CurrentUser('id') id: string,
     @Param('id', ParseIntPipe) productId: number,
     @Body() dto: UpdateProductDto,
     @Query('businessId', ParseIntPipe) businessId: number,
+    @UploadedFile() file?: Express.Multer.File, // 👈 Recibimos el archivo opcional
   ) {
+    if (file) {
+      const uploadResult = await this.cloudinaryService.uploadFile(file);
+      dto.imageUrl = uploadResult.secure_url;
+    }
+
     return this.productsService.update(dto, id, productId, businessId);
   }
 }

@@ -6,10 +6,14 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { PaginationDto } from './dto/pagination.dto';
+import { SubscriptionsService } from 'src/suscriptions/subscriptions.service';
 
 @Injectable()
 export class BusinessEmployeesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly subscriptionsService: SubscriptionsService,
+  ) {}
 
   // Listar empleados del negocio
   async findAll(businessId: number, paginationDto: PaginationDto) {
@@ -72,22 +76,46 @@ export class BusinessEmployeesService {
       );
     }
 
-    return this.prisma.businessEmployee.update({
-      where: { id: employeeId },
-      data: {
-        ...(dto.role && { role: dto.role }),
-        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
-        ...(dto.permissions && { permissions: dto.permissions }),
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            username: true,
-            email: true,
+    return await this.prisma.$transaction(async (tx) => {
+      const { periodStart, periodEnd } =
+        await this.subscriptionsService.getCurrentUsagePeriod(businessId);
+
+      await tx.businessUsage.upsert({
+        where: {
+          businessId_type_periodStart: {
+            businessId: businessId,
+            type: 'MOVEMENTS',
+            periodStart,
           },
         },
-      },
+        update: {
+          value: { increment: 1 },
+        },
+        create: {
+          businessId: businessId,
+          type: 'MOVEMENTS',
+          value: 1,
+          periodStart,
+          periodEnd,
+        },
+      });
+      return tx.businessEmployee.update({
+        where: { id: employeeId },
+        data: {
+          ...(dto.role && { role: dto.role }),
+          ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+          ...(dto.permissions && { permissions: dto.permissions }),
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              username: true,
+              email: true,
+            },
+          },
+        },
+      });
     });
   }
 

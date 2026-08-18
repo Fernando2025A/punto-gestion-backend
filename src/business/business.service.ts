@@ -5,11 +5,18 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { UpdateBusinessDto } from './dto/update-business.dto';
-import { Permission } from 'generated/prisma/enums';
+import { LimitType, Permission } from 'generated/prisma/enums';
+import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
+import { CreateExpenseDto } from './dto/create-expense.dto';
+import { SubscriptionsService } from 'src/suscriptions/subscriptions.service';
 
 @Injectable()
 export class BusinessService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinaryService: CloudinaryService,
+    private readonly subscriptionsService: SubscriptionsService,
+  ) {}
 
   // 1. Listar todos los negocios a los que el usuario tiene acceso (Owner o Empleado activo)
   async findAllForUser(userId: string) {
@@ -24,6 +31,7 @@ export class BusinessService {
             id: true,
             name: true,
             description: true,
+            imageUrl: true,
             ownerId: true,
           },
         },
@@ -35,6 +43,7 @@ export class BusinessService {
       businessId: emp.business.id,
       businessName: emp.business.name,
       businessDescription: emp.business.description,
+      imageUrl: emp.business.imageUrl,
       isOwner: emp.business.ownerId === userId || emp.role === 'OWNER',
       role: emp.role,
       isActive: emp.isActive,
@@ -88,7 +97,6 @@ export class BusinessService {
     userId: string,
     dto: UpdateBusinessDto,
   ) {
-    // Verificar si el usuario tiene acceso a este negocio
     const employment = await this.prisma.businessEmployee.findUnique({
       where: {
         userId_businessId: { userId, businessId },
@@ -106,19 +114,88 @@ export class BusinessService {
       Permission.UPDATE_BUSINESS,
     );
 
-    // Permitir si es OWNER o si tiene el permiso asignado explícitamente
     if (!isOwner && !hasPermission) {
       throw new ForbiddenException(
         'No tienes permisos para editar la información de este negocio',
       );
     }
 
-    return this.prisma.business.update({
+    const previousImageUrl = employment.business.imageUrl;
+
+    // 2. Actualizamos la base de datos con la nueva imagen
+    const updatedBusiness = await this.prisma.business.update({
       where: { id: businessId },
       data: {
         ...(dto.name && { name: dto.name }),
         ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.imageUrl !== undefined && { imageUrl: dto.imageUrl }),
       },
+    });
+
+    // 3. Verificamos si debemos eliminar la imagen previa
+    if (dto.imageUrl && previousImageUrl && dto.imageUrl !== previousImageUrl) {
+      const publicId =
+        this.cloudinaryService.extractPublicIdFromUrl(previousImageUrl);
+
+      if (publicId) {
+        console.log(
+          `Intentando eliminar de Cloudinary el public_id: "${publicId}"`,
+        );
+
+        try {
+          const result = await this.cloudinaryService.deleteFile(publicId);
+          console.log('Resultado de eliminación en Cloudinary:', result);
+          return updatedBusiness;
+        } catch (err) {
+          console.error('Error al eliminar la imagen en Cloudinary:', err);
+        }
+      } else {
+        console.warn(
+          'No se pudo extraer el public_id de la URL previa:',
+          previousImageUrl,
+        );
+      }
+    }
+  }
+
+  async createExpense(
+    userId: string,
+    dto: CreateExpenseDto,
+    businessId: number,
+  ) {
+    await this.subscriptionsService.validate(businessId, LimitType.EXPENSES, 1);
+
+    return await this.prisma.$transaction(async (tx) => {
+      const { periodStart, periodEnd } =
+        await this.subscriptionsService.getCurrentUsagePeriod(businessId);
+
+      await tx.businessUsage.upsert({
+        where: {
+          businessId_type_periodStart: {
+            businessId: businessId,
+            type: 'EXPENSES',
+            periodStart,
+          },
+        },
+        update: {
+          value: { increment: 1 },
+        },
+        create: {
+          businessId: businessId,
+          type: 'EXPENSES',
+          value: 1,
+          periodStart,
+          periodEnd,
+        },
+      });
+      const expense = await tx.expense.create({
+        data: {
+          ...dto,
+          businessId,
+          userId,
+        },
+      });
+      return expense;
     });
   }
 }

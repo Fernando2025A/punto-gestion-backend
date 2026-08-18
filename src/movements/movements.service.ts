@@ -18,10 +18,25 @@ import { StockEntryDto } from './dto/stock-entry.dto';
 import { UpdateProductDto } from 'src/products/dto/update-product.dto';
 import { FindMovementsDto } from './dto/find-movements.dto';
 import { FindStockDto } from './dto/find-stock.dto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { SubscriptionsService } from 'src/suscriptions/subscriptions.service';
+import { BulkStockExitDto } from './dto/bulk-stock-exit.dto';
+import { BulkStockEntryDto } from './dto/bulk-stock-entry.dto';
+
+interface BusinessAlertPayload {
+  businessId: number;
+  type: 'LOW_STOCK' | 'EXPIRATION_WARNING' | 'NEW_EMPLOYEE';
+  message: string;
+  data?: Record<string, any>;
+}
 
 @Injectable()
 export class MovementsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly eventEmitter: EventEmitter2,
+    private readonly subscriptionsService: SubscriptionsService,
+  ) {}
 
   async recordStockExit(
     dto: StockExitDto,
@@ -30,8 +45,45 @@ export class MovementsService {
   ) {
     const { productId, quantity, reason, notes, paymentMethod } = dto;
 
-    return await this.prisma.$transaction(async (tx) => {
-      // 1. Obtener producto e incluir businessId
+    // Variable temporal para guardar la alerta si corresponde emitirla
+    let alertPayloadToSend: BusinessAlertPayload | null = null;
+
+    // 1. Ejecutar operaciones atómicas en Base de Datos
+    const result = await this.prisma.$transaction(async (tx) => {
+      const inventory = await tx.inventory.findUnique({
+        where: { id: inventoryId },
+        select: { businessId: true },
+      });
+
+      if (!inventory) {
+        throw new NotFoundException('Inventario no encontrado');
+      }
+
+      const { periodStart, periodEnd } =
+        await this.subscriptionsService.getCurrentUsagePeriod(
+          inventory.businessId,
+        );
+
+      await tx.businessUsage.upsert({
+        where: {
+          businessId_type_periodStart: {
+            businessId: inventory.businessId,
+            type: 'MOVEMENTS',
+            periodStart,
+          },
+        },
+        update: {
+          value: { increment: 1 },
+        },
+        create: {
+          businessId: inventory.businessId,
+          type: 'MOVEMENTS',
+          value: 1,
+          periodStart,
+          periodEnd,
+        },
+      });
+      // Obtener producto e incluir businessId desde la relación inventory
       const product = await tx.product.findFirst({
         where: { id: productId, inventoryId },
         include: {
@@ -49,17 +101,17 @@ export class MovementsService {
       const previousStock = product.stock;
       const newStock = previousStock - quantity;
 
-      // 2. Descontar el stock
+      // Descontar el stock
       const updatedProduct = await tx.product.update({
         where: { id: productId },
         data: { stock: newStock },
       });
 
-      // 3. Crear el historial con el enum tipificado
+      // Crear el historial
       const movement = await tx.movementHistory.create({
         data: {
           type: MovementType.STOCK_EXIT,
-          reason, // Ej: MovementReason.SALE, MovementReason.WASTE, etc.
+          reason,
           notes: notes ?? null,
           quantity,
           previousStock,
@@ -72,7 +124,7 @@ export class MovementsService {
 
       let sale: any = null;
 
-      // 4. Crear la Venta ÚNICAMENTE si el motivo es VENTA
+      // Crear la Venta ÚNICAMENTE si el motivo es VENTA
       if (reason === MovementReason.SALE) {
         const businessId = product.inventory.businessId;
         const unitPrice = Number(product.price);
@@ -87,7 +139,7 @@ export class MovementsService {
             discount: 0,
             total: totalAmount,
             status: SaleStatus.COMPLETED,
-            paymentMethod: paymentMethod ?? PaymentMethod.CASH, // 👈 Se asigna el valor enviado en el DTO o CASH por defecto
+            paymentMethod: paymentMethod ?? PaymentMethod.CASH,
             items: {
               create: [
                 {
@@ -107,12 +159,40 @@ export class MovementsService {
         });
       }
 
+      // Preparar la alerta de stock si aplica
+      const threshold = updatedProduct.minimumStock ?? 10; // Usar minimumStock o fallback
+
+      // Alerta solo si cruzó el límite hacia abajo en esta transacción
+      const isLow = newStock <= threshold;
+      const wasAbove = previousStock > threshold;
+
+      if (isLow && wasAbove) {
+        alertPayloadToSend = {
+          businessId: product.inventory.businessId, // 👈 Se envía el businessId para el Room de WS
+          type: 'LOW_STOCK',
+          message: `¡Alerta! El producto "${updatedProduct.name}" ha alcanzado el nivel mínimo de stock (${newStock} unidades restantes).`,
+          data: {
+            productId: updatedProduct.id,
+            productName: updatedProduct.name,
+            currentStock: newStock,
+            minimumStock: threshold,
+          },
+        };
+      }
+
       return {
         product: updatedProduct,
         movement,
-        sale, // Retorna null si fue una pérdida/merma, o el objeto Sale si fue una venta
+        sale,
       };
     });
+
+    // 2. Emitir el evento de WebSockets SOLAMENTE tras confirmación en BD
+    if (alertPayloadToSend) {
+      this.eventEmitter.emit('business.alert', alertPayloadToSend);
+    }
+
+    return result;
   }
 
   async createProduct(
@@ -145,7 +225,6 @@ export class MovementsService {
       if (!inventory) {
         throw new NotFoundException('Inventario no encontrado');
       }
-
       // 2. Crear el producto
       const product = await tx.product.create({
         data: {
@@ -154,6 +233,7 @@ export class MovementsService {
           purchasePrice: dto.purchasePrice,
           stock: dto.stock,
           minimumStock: dto.minimumStock,
+          imageUrl: dto.imageUrl,
           category: dto.category,
           supplierId: dto.supplierId,
           expirationDate: dto.expirationDate
@@ -216,6 +296,19 @@ export class MovementsService {
     const { productId, quantity, notes } = dto;
 
     return await this.prisma.$transaction(async (tx) => {
+      const inventory = await tx.inventory.findUnique({
+        where: { id: inventoryId },
+        select: { businessId: true },
+      });
+
+      if (!inventory) {
+        throw new NotFoundException('Inventario no encontrado');
+      }
+
+      const { periodStart, periodEnd } =
+        await this.subscriptionsService.getCurrentUsagePeriod(
+          inventory.businessId,
+        );
       // 1. Buscar el producto validando el inventario
       const product = await tx.product.findFirst({
         where: { id: productId, inventoryId },
@@ -248,6 +341,26 @@ export class MovementsService {
         },
       });
 
+      await tx.businessUsage.upsert({
+        where: {
+          businessId_type_periodStart: {
+            businessId: inventory.businessId,
+            type: 'MOVEMENTS',
+            periodStart,
+          },
+        },
+        update: {
+          value: { increment: 1 },
+        },
+        create: {
+          businessId: inventory.businessId,
+          type: 'MOVEMENTS',
+          value: 1,
+          periodStart,
+          periodEnd,
+        },
+      });
+
       return updatedProduct;
     });
   }
@@ -259,6 +372,39 @@ export class MovementsService {
     inventoryId: number,
   ) {
     return await this.prisma.$transaction(async (tx) => {
+      const inventory = await tx.inventory.findUnique({
+        where: { id: inventoryId },
+        select: { businessId: true },
+      });
+
+      if (!inventory) {
+        throw new NotFoundException('Inventario no encontrado');
+      }
+
+      const { periodStart, periodEnd } =
+        await this.subscriptionsService.getCurrentUsagePeriod(
+          inventory.businessId,
+        );
+
+      await tx.businessUsage.upsert({
+        where: {
+          businessId_type_periodStart: {
+            businessId: inventory.businessId,
+            type: 'MOVEMENTS',
+            periodStart,
+          },
+        },
+        update: {
+          value: { increment: 1 },
+        },
+        create: {
+          businessId: inventory.businessId,
+          type: 'MOVEMENTS',
+          value: 1,
+          periodStart,
+          periodEnd,
+        },
+      });
       // 1. Obtener el producto ANTES de la modificación
       const currentProduct = await tx.product.findFirst({
         where: { id: productId, inventoryId },
@@ -306,7 +452,7 @@ export class MovementsService {
           quantity: null,
           previousStock: currentProduct.stock,
           newStock: updatedProduct.stock,
-          details: changes, // 👈 Guardamos el objeto con las diferencias
+          details: changes,
           inventoryId,
           productId,
           userId,
@@ -319,6 +465,39 @@ export class MovementsService {
 
   async deleteProduct(productId: number, userId: string, inventoryId: number) {
     return await this.prisma.$transaction(async (tx) => {
+      const inventory = await tx.inventory.findUnique({
+        where: { id: inventoryId },
+        select: { businessId: true },
+      });
+
+      if (!inventory) {
+        throw new NotFoundException('Inventario no encontrado');
+      }
+
+      const { periodStart, periodEnd } =
+        await this.subscriptionsService.getCurrentUsagePeriod(
+          inventory.businessId,
+        );
+
+      await tx.businessUsage.upsert({
+        where: {
+          businessId_type_periodStart: {
+            businessId: inventory.businessId,
+            type: 'MOVEMENTS',
+            periodStart,
+          },
+        },
+        update: {
+          value: { increment: 1 },
+        },
+        create: {
+          businessId: inventory.businessId,
+          type: 'MOVEMENTS',
+          value: 1,
+          periodStart,
+          periodEnd,
+        },
+      });
       // 1. Obtener el producto antes de ser eliminado
       const product = await tx.product.findFirst({
         where: { id: productId, inventoryId },
@@ -610,5 +789,277 @@ export class MovementsService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  async recordBulkStockExit(
+    dto: BulkStockExitDto,
+    userId: string,
+    inventoryId: number,
+  ) {
+    const { items, reason, notes, paymentMethod } = dto;
+    const productIds = items.map((i) => i.productId);
+    const alertsToSend: BusinessAlertPayload[] = [];
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 1. Obtener inventario y validar periodo
+      const inventory = await tx.inventory.findUnique({
+        where: { id: inventoryId },
+        select: { businessId: true },
+      });
+      if (!inventory) throw new NotFoundException('Inventario no encontrado');
+
+      // 2. Obtener todos los productos solicitados de un solo query
+      const products = await tx.product.findMany({
+        where: { id: { in: productIds }, inventoryId },
+      });
+
+      if (products.length !== productIds.length) {
+        throw new NotFoundException(
+          'Uno o más productos no existen en el inventario',
+        );
+      }
+
+      const productMap = new Map(products.map((p) => [p.id, p]));
+      const saleItemsData: any = [];
+      let totalSaleAmount = 0;
+
+      // 3. Validar stock y preparar actualizaciones
+      for (const item of items) {
+        const product = productMap.get(item.productId)!;
+        if (product.stock < item.quantity) {
+          throw new BadRequestException(
+            `Stock insuficiente para "${product.name}"`,
+          );
+        }
+
+        const previousStock = product.stock;
+        const newStock = previousStock - item.quantity;
+
+        // Actualizar stock del producto
+        await tx.product.update({
+          where: { id: product.id },
+          data: { stock: newStock },
+        });
+
+        // Crear entrada individual de historial
+        await tx.movementHistory.create({
+          data: {
+            type: MovementType.STOCK_EXIT,
+            reason,
+            notes: notes ?? null,
+            quantity: item.quantity,
+            previousStock,
+            newStock,
+            inventoryId,
+            productId: product.id,
+            userId,
+          },
+        });
+
+        // Recopilar datos si el motivo es VENTA
+        if (reason === MovementReason.SALE) {
+          const unitPrice = Number(product.price);
+          const unitCost = Number(product.purchasePrice);
+          const subtotal = unitPrice * item.quantity;
+          totalSaleAmount += subtotal;
+
+          saleItemsData.push({
+            productId: product.id,
+            productName: product.name,
+            quantity: item.quantity,
+            unitPrice,
+            unitCost,
+            subtotal,
+          });
+        }
+
+        // Evaluar alertas de stock mínimo
+        const threshold = product.minimumStock ?? 10;
+        if (newStock <= threshold && previousStock > threshold) {
+          alertsToSend.push({
+            businessId: inventory.businessId,
+            type: 'LOW_STOCK',
+            message: `¡Alerta! "${product.name}" alcanzó el stock mínimo (${newStock} unidades).`,
+            data: {
+              productId: product.id,
+              productName: product.name,
+              currentStock: newStock,
+            },
+          });
+        }
+      }
+
+      // 4. Crear una sola venta agrupada con sus ítems
+      let sale: any = null;
+      if (reason === MovementReason.SALE && saleItemsData.length > 0) {
+        sale = await tx.sale.create({
+          data: {
+            businessId: inventory.businessId,
+            userId,
+            subtotal: totalSaleAmount,
+            total: totalSaleAmount,
+            status: SaleStatus.COMPLETED,
+            paymentMethod: paymentMethod ?? PaymentMethod.CASH,
+            items: { create: saleItemsData },
+          },
+          include: { items: true },
+        });
+      }
+
+      // 5. Incrementar contador de uso (1 movimiento por transacción compuesta)
+      const { periodStart, periodEnd } =
+        await this.subscriptionsService.getCurrentUsagePeriod(
+          inventory.businessId,
+        );
+      await tx.businessUsage.upsert({
+        where: {
+          businessId_type_periodStart: {
+            businessId: inventory.businessId,
+            type: 'MOVEMENTS',
+            periodStart,
+          },
+        },
+        update: { value: { increment: 1 } },
+        create: {
+          businessId: inventory.businessId,
+          type: 'MOVEMENTS',
+          value: 1,
+          periodStart,
+          periodEnd,
+        },
+      });
+
+      return { success: true, count: items.length, sale };
+    });
+
+    // Emitir alertas acumuladas tras confirmar transacción
+    alertsToSend.forEach((alert) =>
+      this.eventEmitter.emit('business.alert', alert),
+    );
+
+    return result;
+  }
+
+  async recordBulkStockEntry(
+    dto: BulkStockEntryDto,
+    userId: string,
+    inventoryId: number,
+  ) {
+    const { items, supplierId, notes } = dto;
+    const productIds = items.map((i) => i.productId);
+
+    return await this.prisma.$transaction(async (tx) => {
+      // 1. Validar existencia del inventario
+      const inventory = await tx.inventory.findUnique({
+        where: { id: inventoryId },
+        select: { businessId: true },
+      });
+      if (!inventory) throw new NotFoundException('Inventario no encontrado');
+
+      // 2. Validar proveedor si se provee
+      if (supplierId) {
+        const supplier = await tx.supplier.findFirst({
+          where: { id: supplierId, inventoryId },
+        });
+        if (!supplier) {
+          throw new NotFoundException('El proveedor especificado no existe');
+        }
+      }
+
+      // 3. Buscar todos los productos del lote en una sola consulta
+      const products = await tx.product.findMany({
+        where: { id: { in: productIds }, inventoryId },
+      });
+
+      if (products.length !== productIds.length) {
+        throw new NotFoundException(
+          'Uno o más productos no existen en el inventario',
+        );
+      }
+
+      const productMap = new Map(products.map((p) => [p.id, p]));
+      const purchaseItemsData: any = [];
+      let totalPurchaseAmount = 0;
+
+      // 4. Procesar actualización de stock e historial por cada producto
+      for (const item of items) {
+        const product = productMap.get(item.productId)!;
+        const previousStock = product.stock;
+        const newStock = previousStock + item.quantity;
+
+        // Usar el costo enviado o tomar el purchasePrice actual del producto como fallback
+        const unitCost = item.unitCost ?? Number(product.purchasePrice);
+        const subtotal = unitCost * item.quantity;
+        totalPurchaseAmount += subtotal;
+
+        // Incrementar stock del producto
+        await tx.product.update({
+          where: { id: product.id },
+          data: { stock: newStock },
+        });
+
+        // Crear entrada individual en el historial
+        await tx.movementHistory.create({
+          data: {
+            type: MovementType.STOCK_ENTRY,
+            reason: MovementReason.PURCHASE,
+            notes: notes ?? 'Ingreso masivo de stock',
+            quantity: item.quantity,
+            previousStock,
+            newStock,
+            inventoryId,
+            productId: product.id,
+            userId,
+          },
+        });
+
+        purchaseItemsData.push({
+          productId: product.id,
+          productName: product.name,
+          quantity: item.quantity,
+          unitCost,
+          subtotal,
+        });
+      }
+
+      // 5. Crear el registro global de la Compra (Purchase)
+      const purchase = await tx.purchase.create({
+        data: {
+          businessId: inventory.businessId,
+          supplierId: supplierId ?? null,
+          userId,
+          subtotal: totalPurchaseAmount,
+          total: totalPurchaseAmount,
+          items: { create: purchaseItemsData },
+        },
+        include: { items: true },
+      });
+
+      // 6. Contabilizar como 1 único movimiento consumido en el plan de suscripción
+      const { periodStart, periodEnd } =
+        await this.subscriptionsService.getCurrentUsagePeriod(
+          inventory.businessId,
+        );
+
+      await tx.businessUsage.upsert({
+        where: {
+          businessId_type_periodStart: {
+            businessId: inventory.businessId,
+            type: 'MOVEMENTS',
+            periodStart,
+          },
+        },
+        update: { value: { increment: 1 } },
+        create: {
+          businessId: inventory.businessId,
+          type: 'MOVEMENTS',
+          value: 1,
+          periodStart,
+          periodEnd,
+        },
+      });
+
+      return { success: true, count: items.length, purchase };
+    });
   }
 }

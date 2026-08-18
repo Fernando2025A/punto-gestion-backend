@@ -11,9 +11,12 @@ import { MovementsService } from 'src/movements/movements.service';
 import { StockExitDto } from 'src/movements/dto/stock-exit.dto';
 import { StockEntryDto } from 'src/movements/dto/stock-entry.dto';
 import { SuppliersService } from 'src/suppliers/suppliers.service';
-import { BusinessAccessService } from 'src/business/business-access/business-access.service';
-import { Category } from 'generated/prisma/enums';
+import { Category, LimitType } from 'generated/prisma/enums';
 import { Prisma } from 'generated/prisma/client';
+import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
+import { SubscriptionsService } from 'src/suscriptions/subscriptions.service';
+import { BulkStockExitDto } from 'src/movements/dto/bulk-stock-exit.dto';
+import { BulkStockEntryDto } from 'src/movements/dto/bulk-stock-entry.dto';
 
 @Injectable()
 export class ProductsService {
@@ -21,7 +24,8 @@ export class ProductsService {
     private readonly prisma: PrismaService,
     private readonly movements: MovementsService,
     private readonly suppliersService: SuppliersService,
-    private readonly businessAccess: BusinessAccessService,
+    private readonly cloudinaryService: CloudinaryService,
+    private readonly subscriptionsService: SubscriptionsService,
   ) {}
 
   // Helper privado para transformar los valores Decimal de Prisma a Number de JS
@@ -38,6 +42,7 @@ export class ProductsService {
   }
 
   async create(dto: CreateProductDto, userId: string, businessId: number) {
+    await this.subscriptionsService.validate(businessId, LimitType.PRODUCTS, 1);
     const inventory = await this.prisma.inventory.findUnique({
       where: { businessId },
       select: { id: true },
@@ -46,6 +51,8 @@ export class ProductsService {
     if (!inventory) {
       throw new NotFoundException('El inventario de este negocio no existe');
     }
+
+    // dto ya incluye dto.imageUrl de forma opcional si se subió un archivo
     return this.movements.createProduct(dto, userId, inventory.id);
   }
 
@@ -54,6 +61,11 @@ export class ProductsService {
     userId: string,
     businessId: number,
   ) {
+    await this.subscriptionsService.validate(
+      businessId,
+      LimitType.MOVEMENTS,
+      1,
+    );
     const inventory = await this.prisma.inventory.findUnique({
       where: { businessId },
       select: { id: true },
@@ -66,6 +78,11 @@ export class ProductsService {
   }
 
   async recordStockExit(dto: StockExitDto, userId: string, businessId: number) {
+    await this.subscriptionsService.validate(
+      businessId,
+      LimitType.MOVEMENTS,
+      1,
+    );
     const inventory = await this.prisma.inventory.findUnique({
       where: { businessId },
       select: { id: true },
@@ -75,6 +92,48 @@ export class ProductsService {
       throw new NotFoundException('El inventario de este negocio no existe');
     }
     return this.movements.recordStockExit(dto, userId, inventory.id);
+  }
+
+  async bulkStockExit(
+    dto: BulkStockExitDto,
+    userId: string,
+    businessId: number,
+  ) {
+    await this.subscriptionsService.validate(
+      businessId,
+      LimitType.MOVEMENTS,
+      1,
+    );
+    const inventory = await this.prisma.inventory.findUnique({
+      where: { businessId },
+      select: { id: true },
+    });
+
+    if (!inventory) {
+      throw new NotFoundException('El inventario de este negocio no existe');
+    }
+    return this.movements.recordBulkStockExit(dto, userId, inventory.id);
+  }
+
+  async bulkStockEntry(
+    dto: BulkStockEntryDto,
+    userId: string,
+    businessId: number,
+  ) {
+    await this.subscriptionsService.validate(
+      businessId,
+      LimitType.MOVEMENTS,
+      1,
+    );
+    const inventory = await this.prisma.inventory.findUnique({
+      where: { businessId },
+      select: { id: true },
+    });
+
+    if (!inventory) {
+      throw new NotFoundException('El inventario de este negocio no existe');
+    }
+    return this.movements.recordBulkStockEntry(dto, userId, inventory.id);
   }
 
   async findAll(userId: string, dto: FindProductsDto, businessId: number) {
@@ -172,12 +231,13 @@ export class ProductsService {
       throw new NotFoundException('El inventario de este negocio no existe');
     }
 
+    // 👈 AÑADIDO: Incluimos imageUrl en el select para saber si tenía imagen previa
     const existingProduct = await this.prisma.product.findFirst({
       where: {
         id: productId,
         inventoryId: inventory.id,
       },
-      select: { id: true, category: true },
+      select: { id: true, category: true, imageUrl: true },
     });
 
     if (!existingProduct) {
@@ -197,14 +257,39 @@ export class ProductsService {
       await this.suppliersService.findOne(dto.supplierId, userId, businessId);
     }
 
+    const previousImageUrl = existingProduct.imageUrl;
     const { stock, ...cleanDto } = dto;
 
-    return this.movements.recordProductUpdate(
+    // Ejecutamos la actualización del producto y registramos el movimiento
+    const updatedProduct = await this.movements.recordProductUpdate(
       productId,
       cleanDto,
       userId,
       inventory.id,
     );
+
+    // 👈 AÑADIDO: Si se asignó una nueva imagen y existía una anterior, eliminamos la previa
+    if (dto.imageUrl && previousImageUrl && dto.imageUrl !== previousImageUrl) {
+      const publicId =
+        this.cloudinaryService.extractPublicIdFromUrl(previousImageUrl);
+
+      if (publicId) {
+        try {
+          const result = await this.cloudinaryService.deleteFile(publicId);
+          console.log(
+            `Imagen previa de producto eliminada (${publicId}):`,
+            result,
+          );
+        } catch (err) {
+          console.error(
+            `Error al eliminar imagen previa del producto (${publicId}):`,
+            err,
+          );
+        }
+      }
+    }
+
+    return updatedProduct;
   }
 
   async delete(userId: string, productId: number, businessId: number) {

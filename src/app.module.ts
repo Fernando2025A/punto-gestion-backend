@@ -1,6 +1,4 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { ProductsModule } from './products/products.module';
@@ -13,10 +11,18 @@ import { ReportsModule } from './reports/reports.module';
 import { BusinessInvitesModule } from './business/business-invites/business-invites.module';
 import { BusinessEmployeesModule } from './business/business-employees/business-employees.module';
 import { BusinessModule } from './business/business.module';
+import { MailModule } from './mail/mail.module';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { AlertsModule } from './alerts/alerts.module';
+import { CloudinaryModule } from './cloudinary/cloudinary.module';
+import { SuscriptionsModule } from './suscriptions/subscriptions.module';
 
 @Module({
   imports: [
+    EventEmitterModule.forRoot(),
+    AlertsModule,
     PrismaModule,
+    CloudinaryModule,
     AuthModule,
     ProductsModule,
     InventoryModule,
@@ -25,11 +31,11 @@ import { BusinessModule } from './business/business.module';
     SuppliersModule,
     ScheduleModule.forRoot(),
     ReportsModule,
+    MailModule,
     BusinessInvitesModule,
     BusinessEmployeesModule,
     BusinessModule,
+    SuscriptionsModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}

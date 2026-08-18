@@ -10,10 +10,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { FindSupplierDto } from './dto/find-supplier.dto';
+import { SubscriptionsService } from 'src/suscriptions/subscriptions.service';
+import { LimitType } from 'generated/prisma/enums';
 
 @Injectable()
 export class SuppliersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly subscriptionsService: SubscriptionsService,
+  ) {}
 
   /**
    * Helper privado para validar que el usuario pertenezca al negocio y obtener su inventoryId
@@ -62,32 +67,39 @@ export class SuppliersService {
     userId: string,
     businessId: number,
   ) {
+    await this.subscriptionsService.validate(
+      businessId,
+      LimitType.SUPPLIERS,
+      1,
+    );
     const inventoryId = await this.getInventoryAndValidateAccess(
       userId,
       businessId,
     );
 
-    // Validar si ya existe el nombre en este inventario
-    const existing = await this.prisma.supplier.findUnique({
-      where: {
-        name_inventoryId: {
-          name: createSupplierDto.name,
+    return await this.prisma.$transaction(async (tx) => {
+      // Validar si ya existe el nombre en este inventario
+      const existing = await tx.supplier.findUnique({
+        where: {
+          name_inventoryId: {
+            name: createSupplierDto.name,
+            inventoryId,
+          },
+        },
+      });
+
+      if (existing) {
+        throw new ConflictException(
+          'Ya existe un proveedor con este nombre en tu inventario',
+        );
+      }
+
+      return await tx.supplier.create({
+        data: {
+          ...createSupplierDto,
           inventoryId,
         },
-      },
-    });
-
-    if (existing) {
-      throw new ConflictException(
-        'Ya existe un proveedor con este nombre en tu inventario',
-      );
-    }
-
-    return await this.prisma.supplier.create({
-      data: {
-        ...createSupplierDto,
-        inventoryId,
-      },
+      });
     });
   }
 
@@ -163,29 +175,58 @@ export class SuppliersService {
     userId: string,
     businessId: number,
   ) {
+    await this.subscriptionsService.validate(
+      businessId,
+      LimitType.MOVEMENTS,
+      1,
+    );
     const supplier = await this.findOne(id, userId, businessId);
 
-    // Si se está cambiando el nombre, validar que no colisione con otro proveedor del mismo inventario
-    if (updateSupplierDto.name && updateSupplierDto.name !== supplier.name) {
-      const existing = await this.prisma.supplier.findUnique({
+    return await this.prisma.$transaction(async (tx) => {
+      const { periodStart, periodEnd } =
+        await this.subscriptionsService.getCurrentUsagePeriod(businessId);
+
+      await tx.businessUsage.upsert({
         where: {
-          name_inventoryId: {
-            name: updateSupplierDto.name,
-            inventoryId: supplier.inventoryId,
+          businessId_type_periodStart: {
+            businessId: businessId,
+            type: 'MOVEMENTS',
+            periodStart,
           },
         },
+        update: {
+          value: { increment: 1 },
+        },
+        create: {
+          businessId: businessId,
+          type: 'MOVEMENTS',
+          value: 1,
+          periodStart,
+          periodEnd,
+        },
       });
+      // Si se está cambiando el nombre, validar que no colisione con otro proveedor del mismo inventario
+      if (updateSupplierDto.name && updateSupplierDto.name !== supplier.name) {
+        const existing = await tx.supplier.findUnique({
+          where: {
+            name_inventoryId: {
+              name: updateSupplierDto.name,
+              inventoryId: supplier.inventoryId,
+            },
+          },
+        });
 
-      if (existing) {
-        throw new ConflictException(
-          'Ya existe otro proveedor con este nombre en tu inventario',
-        );
+        if (existing) {
+          throw new ConflictException(
+            'Ya existe otro proveedor con este nombre en tu inventario',
+          );
+        }
       }
-    }
 
-    return await this.prisma.supplier.update({
-      where: { id: supplier.id },
-      data: updateSupplierDto,
+      return await tx.supplier.update({
+        where: { id: supplier.id },
+        data: updateSupplierDto,
+      });
     });
   }
 

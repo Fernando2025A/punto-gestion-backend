@@ -13,6 +13,7 @@ import type { JwtSignOptions } from '@nestjs/jwt';
 import { randomBytes } from 'crypto';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/client';
 import { JwtPayload } from './jwt-payload.interface';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class AuthService {
@@ -29,8 +30,9 @@ export class AuthService {
         // 1. Crear el usuario
         const newUser = await tx.user.create({
           data: {
-            username: dto.username,
+            username: dto.username.toLowerCase().trim(),
             email: dto.email,
+            activeBusinessId: 1,
             password: hashedPassword,
             provider: 'LOCAL',
             emailVerified: false,
@@ -40,6 +42,7 @@ export class AuthService {
             username: true,
             email: true,
             emailVerified: true,
+            activeBusinessId: true,
             provider: true,
             createdAt: true,
           },
@@ -63,6 +66,13 @@ export class AuthService {
             id: true,
             name: true,
             inventory: { select: { id: true } },
+          },
+        });
+
+        await tx.user.update({
+          where: { id: newUser.id },
+          data: {
+            activeBusinessId: defaultBusiness.id,
           },
         });
 
@@ -100,7 +110,7 @@ export class AuthService {
   async validateUser(identifier: string, password: string) {
     const user = await this.prisma.user.findFirst({
       where: {
-        OR: [{ username: identifier }, { email: identifier }],
+        OR: [{ username: identifier.toLowerCase() }, { email: identifier }],
       },
     });
 
@@ -119,6 +129,7 @@ export class AuthService {
       id: user.id,
       username: user.username,
       email: user.email,
+      activeBusinessId: user.activeBusinessId,
       emailVerified: user.emailVerified,
       provider: user.provider,
     };
@@ -183,6 +194,7 @@ export class AuthService {
     username: string | null;
     email: string | null;
     emailVerified: boolean;
+    activeBusinessId: number;
     provider: string;
     isTemporaly?: boolean;
     expiresAt?: Date | null;
@@ -249,6 +261,7 @@ export class AuthService {
       user: {
         id: user.id,
         username: user.username,
+        activeBusinessId: user.activeBusinessId,
         email: user.email,
         emailVerified: user.emailVerified,
         provider: user.provider,
@@ -257,6 +270,29 @@ export class AuthService {
       },
       businesses: userBusinesses, // 👈 Ahora el frontend sabe a qué negocios tiene acceso el usuario
     };
+  }
+
+  async update(userId: string, dto: UpdateUserDto) {
+    if (dto.password) {
+      const hashedPassword = await bcrypt.hash(dto.password, 10);
+      return await this.prisma.$transaction(async (tx) => {
+        return await tx.user.update({
+          where: { id: userId },
+          data: {
+            username: dto.username,
+            password: hashedPassword,
+          },
+        });
+      });
+    }
+    return await this.prisma.$transaction(async (tx) => {
+      return await tx.user.update({
+        where: { id: userId },
+        data: {
+          ...dto,
+        },
+      });
+    });
   }
 
   async refreshAccessToken(refreshToken: string) {
@@ -321,13 +357,14 @@ export class AuthService {
         const newUser = await tx.user.create({
           data: {
             username,
+            activeBusinessId: 1,
             email: profile.email,
             provider: 'GOOGLE',
             emailVerified: true,
           },
         });
 
-        await tx.business.create({
+        const business = await tx.business.create({
           data: {
             name: `Negocio de ${newUser.username}`,
             ownerId: newUser.id,
@@ -342,6 +379,13 @@ export class AuthService {
           },
         });
 
+        await tx.user.update({
+          where: { id: newUser.id },
+          data: {
+            activeBusinessId: business.id,
+          },
+        });
+
         return newUser;
       });
     }
@@ -351,6 +395,7 @@ export class AuthService {
       username: user.username,
       email: user.email,
       emailVerified: user.emailVerified,
+      activeBusinessId: user.activeBusinessId,
       provider: user.provider,
     });
   }
@@ -401,13 +446,14 @@ export class AuthService {
           data: {
             username,
             email,
+            activeBusinessId: 1,
             password: hashedPassword,
             isTemporaly: true,
             expiresAt,
           },
         });
 
-        await tx.business.create({
+        const business = await tx.business.create({
           data: {
             name: `Negocio Demo (${user.username})`,
             ownerId: user.id,
@@ -419,6 +465,13 @@ export class AuthService {
                 isActive: true,
               },
             },
+          },
+        });
+
+        await tx.user.update({
+          where: { id: user.id },
+          data: {
+            activeBusinessId: business.id,
           },
         });
 
@@ -446,7 +499,20 @@ export class AuthService {
         email: true,
         emailVerified: true,
         provider: true,
-        ownedBusinesses: true,
+        activeBusinessId: true,
+        ownedBusinesses: {
+          select: {
+            businessUsage: true,
+            description: true,
+            name: true,
+            imageUrl: true,
+            plan: {
+              include: {
+                limits: true,
+              },
+            },
+          },
+        },
         employments: {
           where: { isActive: true },
           select: {

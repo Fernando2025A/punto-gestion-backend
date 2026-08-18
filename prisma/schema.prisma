@@ -19,12 +19,16 @@ model User {
   stockAlertAt    Int               @default(10)
   expireAlertAt   Int               @default(30)
 
+  imageUrl        String?
+
   isTemporaly     Boolean           @default(false)
   expiresAt       DateTime?
 
   // Relaciones
   // 1. Negocios de los que es dueño directo
   ownedBusinesses Business[]        @relation("BusinessOwner")
+
+  activeBusinessId Int
   
   // 2. Negocios donde trabaja (incluye su propio negocio y los de otros)
   employments     BusinessEmployee[]
@@ -68,26 +72,106 @@ enum AuthProvider {
   GOOGLE
 }
 
-model Business {
-  id          Int                @id @default(autoincrement())
-  name        String
+model PlanLimit {
+  id        Int       @id @default(autoincrement())
 
+  planId    Int
+  plan      Plan      @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  type      LimitType
+  value     Int?
+
+  @@unique([planId, type])
+}
+
+enum LimitType {
+  PRODUCTS
+  EMPLOYEES
+  MOVEMENTS
+  IMAGES
+  SUPPLIERS
+  SALES
+  PURCHASES
+  EXPENSES
+  INVITATIONS
+}
+
+model PlanPermission {
+  id         Int        @id @default(autoincrement())
+
+  planId     Int
+  plan       Plan       @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  permission Permission
+
+  @@unique([planId, permission])
+}
+
+model Plan {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
   description String?
-  
-  // Relaciones
+
+  price       Decimal  @db.Decimal(10,2)
+
+  businesses  Business[]
+
+  limits      PlanLimit[]
+  permissions PlanPermission[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Business {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  imageUrl    String?
+
   ownerId     String
-  owner       User               @relation("BusinessOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  
+  owner       User     @relation("BusinessOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  planId      Int      @default(1)
+  plan        Plan     @relation(fields: [planId], references: [id])
+  planExpiresAt DateTime?
+
   employees   BusinessEmployee[]
-  invites     BusinessInvite[]   // 👈 Códigos de invitación generados
+  invites     BusinessInvite[]
   inventory   Inventory?
 
-  sales     Sale[]
-  purchases Purchase[]
-  expenses  Expense[]
+  sales       Sale[]
+  purchases   Purchase[]
+  expenses    Expense[]
+  businessUsage BusinessUsage[]
 
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model BusinessUsage {
+  id         Int      @id @default(autoincrement())
+
+  businessId Int
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  type       UsageType
+  value      Int      @default(0)
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  @@unique([businessId, type, periodStart])
+  @@index([businessId])
+}
+
+enum UsageType {
+  MOVEMENTS
+  IMAGES
+  SALES
+  PURCHASES
+  EXPENSES
+  INVITATIONS
 }
 
 model BusinessInvite {
@@ -229,6 +313,11 @@ enum Permission {
   // PREMIUM
   // ==========================
   MANAGE_SUBSCRIPTION
+
+  // ==========================
+  // GASTOS
+  // ==========================
+  CREATE_EXPENSE
 }
 
 model Inventory {
@@ -251,7 +340,11 @@ model Product {
   stock         Int
   minimumStock  Int?
 
-  category      Category
+  imageUrl      String?
+
+  expireAlertAt Int           @default(30)
+
+  category       Category
   expirationDate DateTime?     // 👈 Opcional: obligatorio en la lógica si es "FOOD"
 
   createdAt     DateTime       @default(now())
@@ -481,7 +574,7 @@ model Expense {
   amount      Decimal   @db.Decimal(12, 2)
 
   createdAt   DateTime  @default(now())
-  occurredAt  DateTime @default(now())
+  occurredAt  DateTime  @default(now())
 
   @@index([businessId, occurredAt])
   @@index([businessId, createdAt])

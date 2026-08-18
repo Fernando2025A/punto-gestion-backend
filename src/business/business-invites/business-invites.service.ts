@@ -6,12 +6,16 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateInviteDto } from './dto/create-invite.dto';
-import { EmployeeRole, Permission } from 'generated/prisma/enums';
+import { EmployeeRole, LimitType, Permission } from 'generated/prisma/enums';
 import { randomBytes } from 'crypto';
+import { SubscriptionsService } from 'src/suscriptions/subscriptions.service';
 
 @Injectable()
 export class BusinessInvitesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly subscriptionsService: SubscriptionsService,
+  ) {}
 
   // 1. Generar Código de Invitación
   async createInvite(
@@ -19,6 +23,16 @@ export class BusinessInvitesService {
     createdById: string,
     dto: CreateInviteDto,
   ) {
+    await this.subscriptionsService.validate(
+      businessId,
+      LimitType.INVITATIONS,
+      1,
+    );
+    await this.subscriptionsService.validate(
+      businessId,
+      LimitType.EMPLOYEES,
+      1,
+    );
     const randomCode = `INV-${randomBytes(3).toString('hex').toUpperCase()}`;
 
     // 1. Si no se especifican minutos, se toma 60 por defecto
@@ -27,15 +41,39 @@ export class BusinessInvitesService {
     // 2. Calcular la fecha límite sumando los minutos a la hora actual
     const expiresAt = new Date(Date.now() + minutesToExpire * 60 * 1000);
 
-    return this.prisma.businessInvite.create({
-      data: {
-        code: randomCode,
-        role: dto.role,
-        expiresAt,
-        maxUses: dto.maxUses ?? 1,
-        businessId,
-        createdById,
-      },
+    return await this.prisma.$transaction(async (tx) => {
+      const { periodStart, periodEnd } =
+        await this.subscriptionsService.getCurrentUsagePeriod(businessId);
+
+      await tx.businessUsage.upsert({
+        where: {
+          businessId_type_periodStart: {
+            businessId: businessId,
+            type: 'INVITATIONS',
+            periodStart,
+          },
+        },
+        update: {
+          value: { increment: 1 },
+        },
+        create: {
+          businessId: businessId,
+          type: 'INVITATIONS',
+          value: 1,
+          periodStart,
+          periodEnd,
+        },
+      });
+      return tx.businessInvite.create({
+        data: {
+          code: randomCode,
+          role: dto.role,
+          expiresAt,
+          maxUses: dto.maxUses ?? 1,
+          businessId,
+          createdById,
+        },
+      });
     });
   }
 
@@ -51,7 +89,11 @@ export class BusinessInvitesService {
       if (!invite) {
         throw new NotFoundException('El código de invitación no es válido');
       }
-
+      await this.subscriptionsService.validate(
+        invite.business.id,
+        LimitType.EMPLOYEES,
+        1,
+      );
       // b. Validar expiración
       if (new Date() > invite.expiresAt) {
         throw new BadRequestException('El código de invitación ha expirado');

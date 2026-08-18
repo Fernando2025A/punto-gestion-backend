@@ -8,6 +8,8 @@ import {
   Req,
   BadRequestException,
   UseGuards,
+  Patch,
+  UploadedFile,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -16,10 +18,15 @@ import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { LoggerDto } from './dto/logger.dto';
 import { AuthGuard } from '@nestjs/passport';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
 
   private getAuthCookieName() {
     return process.env.AUTH_COOKIE_NAME ?? 'access_token';
@@ -169,6 +176,22 @@ export class AuthController {
     res.clearCookie(this.getAuthCookieName());
     res.clearCookie(this.getRefreshCookieName());
     return { message: 'Sesión cerrada' };
+  }
+
+  @Patch()
+  async update(
+    @CurrentUser('id') id: string,
+    @Body() dto: UpdateUserDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    let imageUrl: string | null = null;
+
+    if (file) {
+      const uploadResult = await this.cloudinaryService.uploadFile(file);
+      imageUrl = uploadResult.secure_url;
+      dto.imageUrl = imageUrl ?? undefined;
+    }
+    return this.authService.update(id, dto);
   }
 
   @Public()
