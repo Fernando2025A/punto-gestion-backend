@@ -17,6 +17,7 @@ import { JwtPayload } from './jwt-payload.interface';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { MailService } from 'src/mail/mail.service';
 import * as crypto from 'crypto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -379,18 +380,6 @@ export class AuthService {
   }
 
   async update(userId: string, dto: UpdateUserDto) {
-    if (dto.password) {
-      const hashedPassword = await bcrypt.hash(dto.password, 10);
-      return await this.prisma.$transaction(async (tx) => {
-        return await tx.user.update({
-          where: { id: userId },
-          data: {
-            username: dto.username,
-            password: hashedPassword,
-          },
-        });
-      });
-    }
     return await this.prisma.$transaction(async (tx) => {
       return await tx.user.update({
         where: { id: userId },
@@ -634,5 +623,77 @@ export class AuthService {
         },
       },
     });
+  }
+
+  // 1. Solicitud de código
+  async forgotPassword(email: string) {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+
+    // Siempre retornar la misma respuesta por seguridad
+    if (!user)
+      return { message: 'Si el correo existe, hemos enviado instrucciones.' };
+
+    const code = this.generate6DigitCode();
+    const hashedToken = this.hashCode(code);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutos
+
+    // Limpiar tokens anteriores y guardar el nuevo
+    await this.prisma.$transaction([
+      this.prisma.userToken.deleteMany({
+        where: { userId: user.id, type: 'PASSWORD_RESET' },
+      }),
+      this.prisma.userToken.create({
+        data: {
+          token: hashedToken,
+          type: 'PASSWORD_RESET',
+          userId: user.id,
+          expiresAt,
+        },
+      }),
+    ]);
+
+    if (!user.email) throw new BadRequestException('Email inexistente');
+    await this.mailService.sendPasswordResetCode(user.email, code);
+    return { message: 'Si el correo existe, hemos enviado instrucciones.' };
+  }
+
+  // 2. Aplicar nueva contraseña
+  async resetPassword(dto: ResetPasswordDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+    if (!user) throw new BadRequestException('Código inválido o expirado.');
+
+    const tokenRecord = await this.prisma.userToken.findFirst({
+      where: {
+        userId: user.id,
+        type: 'PASSWORD_RESET',
+        expiresAt: { gt: new Date() },
+      },
+    });
+
+    if (!tokenRecord || tokenRecord.token !== this.hashCode(dto.code)) {
+      throw new BadRequestException('Código inválido o expirado.');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+
+    // Actualizar contraseña, limpiar tokens de reset y cerrar sesiones activas
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: { password: hashedPassword },
+      }),
+      this.prisma.userToken.deleteMany({
+        where: {
+          userId: user.id,
+          type: { in: ['PASSWORD_RESET', 'REFRESH_TOKEN'] },
+        },
+      }),
+    ]);
+
+    return {
+      message: 'Contraseña actualizada exitosamente. Por favor, inicia sesión.',
+    };
   }
 }

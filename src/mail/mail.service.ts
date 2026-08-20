@@ -86,4 +86,19 @@ export class MailService {
     `,
     });
   }
+
+  async sendPasswordResetCode(to: string, code: string) {
+    return this.resend.emails.send({
+      from: process.env.EMAIL_FROM!,
+      to,
+      subject: 'Restablecer contraseña - Punto Gestión',
+      html: `
+      <h1>Recuperación de Contraseña</h1>
+      <p>Has solicitado restablecer la contraseña de tu cuenta en <strong>Punto Gestión</strong>.</p>
+      <p>Tu código de verificación es: <strong>${code}</strong></p>
+      <p>Este código vencerá en <strong>15 minutos</strong>.</p>
+      <p>Si no solicitaste este cambio, puedes ignorar este mensaje y tu contraseña permanecerá sin cambios.</p>
+    `,
+    });
+  }
 }
