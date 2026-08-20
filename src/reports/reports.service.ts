@@ -3,12 +3,17 @@ import { Permission, SaleStatus } from 'generated/prisma/enums';
 import { BusinessAccessService } from 'src/business/business-access/business-access.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { PeriodDto } from './dto/period.dto';
+import { ReportsExportService } from './reports-export.service';
+import { PdfProps } from './reports-export.service';
+import { SubscriptionsService } from 'src/suscriptions/subscriptions.service';
 
 @Injectable()
 export class ReportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly businessAccess: BusinessAccessService,
+    private readonly reportsExportService: ReportsExportService,
+    private readonly subscriptionsService: SubscriptionsService,
   ) {}
   async getExpiringSoonProducts(
     businessId: number,
@@ -192,7 +197,7 @@ export class ReportsService {
     // 3. Totales generales
     const totalSales = Number(salesAggregate._sum.total ?? 0);
     const totalPurchases = Number(purchasesAggregate._sum.total ?? 0);
-    const totalExpenses = Number(expensesAggregate._sum.amount ?? 0);
+    const totalExpenses = Number(expensesAggregate._sum.amount ?? 0); // Gastos operativos
 
     const costOfGoodsSold = salesItems.reduce((acc, item) => {
       return acc + item.quantity * Number(item.unitCost);
@@ -200,7 +205,9 @@ export class ReportsService {
 
     const totalOutflows = totalPurchases + totalExpenses;
     const grossProfit = totalSales - costOfGoodsSold;
-    const netProfit = totalSales - totalOutflows;
+
+    // CORRECCIÓN: Ganancia Neta = Ganancia Bruta - Gastos Operativos
+    const netProfit = grossProfit - totalExpenses;
 
     // 4. Construcción del arreglo 'chart' agrupado día a día
     const dailyMap = new Map<string, { income: number; expenses: number }>();
@@ -413,5 +420,128 @@ export class ReportsService {
         netProfit,
       },
     };
+  }
+
+  async generateBusinessReportPdf(
+    businessId: number,
+    userId: string,
+    periodDto?: PeriodDto,
+  ): Promise<PDFKit.PDFDocument> {
+    const now = new Date();
+    const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const defaultEnd = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+    );
+
+    // Aseguramos que existan fechas válidas incluso si llega {} desde la Query
+    const period: PeriodDto = {
+      startDate: periodDto?.startDate
+        ? new Date(periodDto.startDate)
+        : defaultStart,
+      endDate: periodDto?.endDate ? new Date(periodDto.endDate) : defaultEnd,
+    };
+
+    const [business, kpis, resume] = await Promise.all([
+      this.prisma.business.findUnique({
+        where: { id: businessId },
+      }),
+      this.getKPIOverview(businessId, userId),
+      this.getBusinessResume(userId, businessId, period),
+    ]);
+
+    const formatDate = (date: Date | string) => {
+      const d = new Date(date);
+      return d.toLocaleDateString('es-AR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+    };
+
+    const pdfProps: PdfProps = {
+      imageUrl: business?.imageUrl || '',
+      businessName: business?.name || 'Mi Negocio',
+      businessDescription: business?.description || 'Resumen de Gestión',
+      startDate: formatDate(period.startDate),
+      endDate: formatDate(period.endDate),
+      expiringSoonCount: kpis.expiringSoonCount,
+      lowRotationCount: kpis.lowRotationCount,
+      outOfStockCount: kpis.outOfStockCount,
+      lowStockCount: kpis.lowStockCount,
+      monthlyResult: kpis.currentMonthProfits.netProfit,
+      totalSales: resume.summary.totalSales,
+      costOfSales: resume.summary.costOfGoodsSold,
+      totalExpenses: resume.summary.totalOutflows,
+      stockExpenses: resume.summary.totalPurchases,
+      operatingExpenses: resume.summary.totalExpenses,
+    };
+
+    return this.reportsExportService.generatePdf(pdfProps);
+  }
+
+  async generateBusinessReportExcel(
+    businessId: number,
+    userId: string,
+    periodDto?: PeriodDto,
+  ): Promise<Buffer> {
+    const now = new Date();
+    const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const defaultEnd = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+    );
+
+    const period: PeriodDto = {
+      startDate: periodDto?.startDate
+        ? new Date(periodDto.startDate)
+        : defaultStart,
+      endDate: periodDto?.endDate ? new Date(periodDto.endDate) : defaultEnd,
+    };
+
+    const [business, kpis, resume] = await Promise.all([
+      this.prisma.business.findUnique({
+        where: { id: businessId },
+      }),
+      this.getKPIOverview(businessId, userId),
+      this.getBusinessResume(userId, businessId, period),
+    ]);
+
+    const formatDate = (date: Date | string) => {
+      const d = new Date(date);
+      return d.toLocaleDateString('es-AR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+    };
+
+    const props: PdfProps = {
+      imageUrl: business?.imageUrl || '',
+      businessName: business?.name || 'Mi Negocio',
+      businessDescription: business?.description || 'Resumen de Gestión',
+      startDate: formatDate(period.startDate),
+      endDate: formatDate(period.endDate),
+      expiringSoonCount: kpis.expiringSoonCount,
+      lowRotationCount: kpis.lowRotationCount,
+      outOfStockCount: kpis.outOfStockCount,
+      lowStockCount: kpis.lowStockCount,
+      monthlyResult: kpis.currentMonthProfits.netProfit,
+      totalSales: resume.summary.totalSales,
+      costOfSales: resume.summary.costOfGoodsSold,
+      totalExpenses: resume.summary.totalOutflows,
+      stockExpenses: resume.summary.totalPurchases,
+      operatingExpenses: resume.summary.totalExpenses,
+    };
+
+    return this.reportsExportService.generateResumeExcel(props);
   }
 }

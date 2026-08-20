@@ -1,7 +1,7 @@
 // user-cleanup.cron.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { PrismaService } from 'src/prisma/prisma.service'; // Ajustá la ruta según tu proyecto
+import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
 export class UserCleanupCronService {
@@ -10,45 +10,59 @@ export class UserCleanupCronService {
   constructor(private readonly prisma: PrismaService) {}
 
   @Cron(CronExpression.EVERY_HOUR)
-  async handleCleanupTemporaryUsers() {
-    this.logger.log('Ejecutando limpieza de usuarios temporales expirados...');
+  async handleCleanup() {
+    this.logger.log('Ejecutando limpieza de usuarios y códigos expirados...');
 
     try {
       const now = new Date();
+      // Límite de 24 horas atrás
+      const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-      // Borrado en lote directo en la Base de Datos
-      // Elimina usuarios que sean isTemporaly = true Y cuyo expiresAt ya haya pasado (expiresAt < now)
-      // O cuya fecha de expiración haya sido configurada a más de 24 horas de su creación
-      const deleteResult = await this.prisma.user.deleteMany({
-        where: {
-          isTemporaly: true,
-          OR: [
-            // Cuentas cuya fecha de expiración ya transcurrió
-            {
-              expiresAt: {
-                lt: now,
+      const [deletedUsers, deletedCodes] = await Promise.all([
+        // 1. Eliminar usuarios temporales vencidos O no verificados con +24hs de antigüedad
+        this.prisma.user.deleteMany({
+          where: {
+            OR: [
+              // Cuentas temporales expiradas
+              {
+                isTemporaly: true,
+                OR: [{ expiresAt: { lt: now } }, { expiresAt: null }],
               },
-            },
-            // Cuentas donde expiresAt es nulo o inválido
-            {
-              expiresAt: null,
-            },
-          ],
-        },
-      });
+              // Cuentas no verificadas creadas hace más de 24 horas
+              {
+                emailVerified: false,
+                createdAt: { lt: twentyFourHoursAgo },
+              },
+            ],
+          },
+        }),
 
-      if (deleteResult.count > 0) {
+        // 2. Eliminar códigos de verificación vencidos
+        this.prisma.verificationCode.deleteMany({
+          where: {
+            expiresAt: { lt: now },
+          },
+        }),
+      ]);
+
+      if (deletedUsers.count > 0) {
         this.logger.warn(
-          `Limpieza completada: Se eliminaron ${deleteResult.count} usuario(s) temporal(es) y todos sus datos asociados.`,
+          `Limpieza de usuarios: Se eliminaron ${deletedUsers.count} usuario(s) (temporales o no verificados).`,
         );
       } else {
-        this.logger.log(
-          'Limpieza completada: No se encontraron usuarios temporales para eliminar.',
+        this.logger.log('Limpieza de usuarios: Sin registros pendientes.');
+      }
+
+      if (deletedCodes.count > 0) {
+        this.logger.warn(
+          `Limpieza de códigos: Se eliminaron ${deletedCodes.count} código(s) de verificación expirado(s).`,
         );
+      } else {
+        this.logger.log('Limpieza de códigos: Sin registros pendientes.');
       }
     } catch (error) {
       this.logger.error(
-        'Error durante la ejecución del cron job de limpieza de usuarios:',
+        'Error durante la ejecución del cron job de limpieza:',
         error,
       );
     }

@@ -16,6 +16,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { AlertsModule } from './alerts/alerts.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { SuscriptionsModule } from './suscriptions/subscriptions.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { SuscriptionsModule } from './suscriptions/subscriptions.module';
     BusinessEmployeesModule,
     BusinessModule,
     SuscriptionsModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

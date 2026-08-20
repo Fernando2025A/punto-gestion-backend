@@ -3,10 +3,11 @@ import {
   ConflictException,
   Injectable,
   InternalServerErrorException,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { CreateUserDto } from './dto/create-user.dto';
+import { CreateUserDto, EmailDto } from './dto/create-user.dto';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import type { JwtSignOptions } from '@nestjs/jwt';
@@ -14,12 +15,15 @@ import { randomBytes } from 'crypto';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/client';
 import { JwtPayload } from './jwt-payload.interface';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { MailService } from 'src/mail/mail.service';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    private readonly mailService: MailService,
   ) {}
 
   async createUser(dto: CreateUserDto) {
@@ -76,6 +80,17 @@ export class AuthService {
           },
         });
 
+        const code = this.generate6DigitCode();
+        await this.mailService.sendCode(dto.email, code);
+        const hashedCode = this.hashCode(code);
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+        await tx.verificationCode.create({
+          data: {
+            code: hashedCode,
+            userId: newUser.id,
+            expiresAt,
+          },
+        });
         return {
           user: newUser,
           defaultBusiness: {
@@ -107,6 +122,97 @@ export class AuthService {
     }
   }
 
+  private hashCode(code: string): string {
+    return crypto.createHash('sha256').update(code).digest('hex');
+  }
+
+  private generate6DigitCode(): string {
+    return crypto.randomInt(100000, 1000000).toString();
+  }
+
+  async verifyUser(dto: EmailDto, code: string) {
+    // 1. Validar que el usuario exista
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Email no registrado');
+    }
+
+    if (user.emailVerified) {
+      throw new BadRequestException('La cuenta ya se encuentra verificada');
+    }
+
+    // 2. Obtener el código más reciente emitido para este usuario
+    const verificationCode = await this.prisma.verificationCode.findFirst({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!verificationCode) {
+      throw new BadRequestException(
+        'No se encontró un código de verificación activo',
+      );
+    }
+
+    // 3. Validar si el código ha expirado
+    if (verificationCode.expiresAt < new Date()) {
+      throw new BadRequestException(
+        'El código ha expirado. Solicita uno nuevo',
+      );
+    }
+
+    // 4. Comparar el hash del código ingresado con el de la base de datos
+    const hashedInputCode = this.hashCode(code);
+    if (verificationCode.code !== hashedInputCode) {
+      throw new BadRequestException('El código ingresado es incorrecto');
+    }
+
+    // 5. Marcar usuario como verificado y limpiar los códigos usados en una transacción
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: { emailVerified: true },
+      }),
+      this.prisma.verificationCode.deleteMany({
+        where: { userId: user.id },
+      }),
+    ]);
+
+    return {
+      message: 'Cuenta verificada exitosamente',
+    };
+  }
+
+  async sendCode(dto: EmailDto) {
+    const user = await this.prisma.user.findUnique({
+      where: {
+        email: dto.email,
+      },
+    });
+
+    if (!user) throw new NotFoundException('Usuario no registrado');
+
+    if (user.emailVerified)
+      throw new BadRequestException('El usuario ya está verificado');
+    const code = this.generate6DigitCode();
+    await this.mailService.sendCode(dto.email, code);
+    const hashedCode = this.hashCode(code);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    await this.prisma.verificationCode.create({
+      data: {
+        code: hashedCode,
+        userId: user.id,
+        expiresAt,
+      },
+    });
+
+    await this.mailService.sendEmail(dto.email);
+    return {
+      message: 'Código enviado correctamente',
+    };
+  }
   async validateUser(identifier: string, password: string) {
     const user = await this.prisma.user.findFirst({
       where: {

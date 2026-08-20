@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    @page { margin: 0; size: A4; }
+    body { font-family: sans-serif; -webkit-print-color-adjust: exact; }
+  </style>
+</head>
+<body class="p-8 bg-slate-50 text-slate-800">
+
+  <!-- Encabezado -->
+  <div class="flex justify-between items-center border-b pb-4 mb-6 border-slate-300">
+    <div class="flex items-center gap-3">
+      <div class="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center text-white font-bold text-xl">🍎</div>
+      <div>
+        <h1 class="text-xl font-bold text-slate-900">{{negocio.nombre}}</h1>
+        <p class="text-sm text-slate-500">{{negocio.direccion}} | Tel: {{negocio.telefono}}</p>
+      </div>
+    </div>
+    <div class="text-right">
+      <h2 class="text-lg font-bold text-blue-900 tracking-wide">REPORTE DEL NEGOCIO</h2>
+      <p class="text-sm text-slate-600">Período: {{periodo.inicio}} - {{periodo.fin}}</p>
+    </div>
+  </div>
+
+  <!-- Tarjetas KPI -->
+  <div class="grid grid-cols-5 gap-3 mb-6">
+    <div class="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+      <p class="text-xs font-semibold text-slate-500">Stock bajo</p>
+      <p class="text-lg font-bold text-slate-900 mt-1">{{kpis.stockBajo}} <span class="text-xs font-normal">prods</span></p>
+    </div>
+    <div class="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+      <p class="text-xs font-semibold text-slate-500">Ganancia del mes</p>
+      <p class="text-lg font-bold text-emerald-600 mt-1">${{kpis.gananciaMes}}</p>
+    </div>
+  </div>
+
+  <!-- Gráfico de Ventas -->
+  <div class="bg-white p-4 rounded-lg border border-slate-200 shadow-sm mb-6">
+    <h3 class="text-sm font-bold text-slate-700 mb-2">Ventas vs Gastos</h3>
+    <div class="h-48 w-full">
+      <canvas id="chartVentas"></canvas>
+    </div>
+  </div>
+
+  <!-- Tabla de Datos -->
+  <table class="w-full text-left border-collapse bg-white rounded-lg overflow-hidden border border-slate-200 text-sm">
+    <thead class="bg-blue-950 text-white">
+      <tr>
+        <th class="p-2">Fecha</th>
+        <th class="p-2">Ventas</th>
+        <th class="p-2">Gastos</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#each registros}}
+      <tr class="border-b border-slate-100">
+        <td class="p-2">{{this.fecha}}</td>
+        <td class="p-2 text-emerald-600">${{this.ventas}}</td>
+        <td class="p-2 text-rose-600">${{this.gastos}}</td>
+      </tr>
+      {{/each}}
+    </tbody>
+  </table>
+
+  <!-- Renderizado de Gráficos -->
+  <script>
+    const ctx = document.getElementById('chartVentas').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [{{{fechasJson}}}], // Pasa un string separado por comas: '"12/08","13/08"'
+        datasets: [{
+          label: 'Ventas',
+          data: [{{ventasJson}}],
+          borderColor: '#10b981',
+          tension: 0.3
+        }, {
+          label: 'Gastos',
+          data: [{{gastosJson}}],
+          borderColor: '#ef4444',
+          tension: 0.3
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false // ¡IMPORTANTE! Desactiva animaciones para Puppeteer
+      }
+    });
+  </script>
+</body>
+</html>

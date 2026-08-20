@@ -5,12 +5,17 @@ import {
   NotImplementedException,
   BadRequestException,
 } from '@nestjs/common';
-import { LimitType } from 'generated/prisma/enums';
+import { LimitType, Permission } from 'generated/prisma/enums';
+import { MailService } from 'src/mail/mail.service';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { CreatePlanRequestDto } from './dto/create-plan-request.dto';
 
 @Injectable()
 export class SubscriptionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mailService: MailService,
+  ) {}
 
   /**
    * Valida si el negocio puede realizar una acción según su plan.
@@ -209,5 +214,101 @@ export class SubscriptionsService {
       },
     });
     return plans;
+  }
+
+  async validatePermission(businessId: number, permissions: Permission[]) {
+    const business = await this.prisma.business.findUnique({
+      where: {
+        id: businessId,
+      },
+      select: {
+        plan: {
+          select: {
+            permissions: {
+              select: {
+                permission: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Negocio no encontrado');
+    }
+
+    const planPermissions =
+      business.plan?.permissions.map((p) => p.permission) ?? [];
+
+    const hasPermission = permissions.every((permission) =>
+      planPermissions.includes(permission),
+    );
+
+    if (!hasPermission) {
+      throw new ForbiddenException('Tu plan no permite realizar esta acción');
+    }
+
+    return true;
+  }
+
+  async requestPlanUpgrade(
+    userId: string,
+    businessId: number,
+    dto: CreatePlanRequestDto,
+  ) {
+    // 1. Validar que NO exista una solicitud PENDING para este negocio
+    const existingRequest = await this.prisma.planUpgradeRequest.findFirst({
+      where: {
+        businessId,
+        status: 'PENDING',
+      },
+    });
+
+    if (existingRequest) {
+      throw new BadRequestException(
+        'Ya tienes una solicitud de cambio de plan pendiente de aprobación.',
+      );
+    }
+
+    // 2. Validar existencia del plan
+    const plan = await this.prisma.plan.findUnique({
+      where: { id: dto.planId },
+    });
+    if (!plan) throw new NotFoundException('El plan seleccionado no existe.');
+
+    // 3. Crear registro de solicitud en BD
+    const request = await this.prisma.planUpgradeRequest.create({
+      data: {
+        businessId,
+        userId,
+        planId: dto.planId,
+        alias: dto.alias,
+        comment: dto.comment,
+      },
+      include: {
+        business: { select: { name: true } },
+        user: { select: { email: true, username: true } },
+        plan: { select: { name: true, price: true } },
+      },
+    });
+
+    // 4. Notificar al admin por correo
+    await this.mailService.sendPlanUpgradeRequestNotification({
+      requestId: request.id,
+      businessId,
+      businessName: request.business.name,
+      userEmail: request.user.email ?? "",
+      planName: request.plan.name,
+      amount: Number(request.plan.price),
+      alias: dto.alias,
+      comment: dto.comment,
+    });
+
+    return {
+      message:
+        'Solicitud enviada con éxito. Verificaremos la transferencia a la brevedad.',
+      requestId: request.id,
+    };
   }
 }

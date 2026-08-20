@@ -13,6 +13,7 @@ model User {
   username        String            @unique
   email           String?           @unique
   password        String?
+  phoneNumber     String?
   provider        AuthProvider      @default(LOCAL)
   emailVerified   Boolean           @default(false)
 
@@ -34,9 +35,11 @@ model User {
   employments     BusinessEmployee[]
 
   movements       MovementHistory[]
+  verificationCodes VerificationCode[]
   tokens          UserToken[]
 
   createdInvites BusinessInvite[]
+  planRequests PlanUpgradeRequest[]
 
   sales Sale[]
   purchases Purchase[]
@@ -118,6 +121,7 @@ model Plan {
 
   limits      PlanLimit[]
   permissions PlanPermission[]
+  planRequests PlanUpgradeRequest[]
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -144,6 +148,7 @@ model Business {
   purchases   Purchase[]
   expenses    Expense[]
   businessUsage BusinessUsage[]
+  planRequests PlanUpgradeRequest[]
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -211,7 +216,7 @@ model BusinessEmployee {
   role        EmployeeRole
 
   permissions Permission[]
-  isActive    Boolean      @default(true) // Si se desactiva, no puede entrar más a este negocio
+  isActive    Boolean      @default(true)
 
   userId      String
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -222,7 +227,7 @@ model BusinessEmployee {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  @@unique([userId, businessId]) // Un usuario no puede estar duplicado en el mismo negocio
+  @@unique([userId, businessId])
   @@index([businessId])
   @@index([userId])
 }
@@ -581,6 +586,18 @@ model Expense {
   @@index([businessId, category])
 }
 
+model VerificationCode {
+  id        String   @id @default(uuid())
+  code      String   // Código OTP (guardar hasheado por seguridad)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([code])
+}
+
 enum ExpenseCategory {
   RENT
   UTILITIES
@@ -590,4 +607,32 @@ enum ExpenseCategory {
   TAXES
   MAINTENANCE
   OTHER
+}
+
+enum PlanRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model PlanUpgradeRequest {
+  id          Int               @id @default(autoincrement())
+  
+  businessId  Int
+  business    Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  planId      Int
+  plan        Plan              @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  alias       String
+  comment     String?
+  status      PlanRequestStatus @default(PENDING)
+
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([businessId, status])
 }

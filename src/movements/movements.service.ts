@@ -341,6 +341,29 @@ export class MovementsService {
         },
       });
 
+      const unitCost = Number(product.purchasePrice);
+      const totalAmount = unitCost * dto.quantity;
+
+      await tx.purchase.create({
+        data: {
+          businessId: inventory.businessId,
+          supplierId: dto.supplierId ?? null,
+          userId,
+          subtotal: totalAmount,
+          total: totalAmount,
+          items: {
+            create: [
+              {
+                productId: product.id,
+                productName: product.name,
+                quantity: dto.quantity,
+                unitCost,
+                subtotal: totalAmount,
+              },
+            ],
+          },
+        },
+      });
       await tx.businessUsage.upsert({
         where: {
           businessId_type_periodStart: {

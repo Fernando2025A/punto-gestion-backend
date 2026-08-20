@@ -10,10 +10,11 @@ import {
   UseGuards,
   Patch,
   UploadedFile,
+  Param,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
-import { CreateUserDto } from './dto/create-user.dto';
+import { CreateUserDto, EmailDto } from './dto/create-user.dto';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { LoggerDto } from './dto/logger.dto';
@@ -57,6 +58,8 @@ export class AuthController {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
+    if (!user.emailVerified)
+      throw new BadRequestException('Correo electrónico no verificado');
     const token = await this.authService.login(user);
     res.cookie(this.getAuthCookieName(), token.access_token, {
       httpOnly: true,
@@ -202,5 +205,17 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser('id') id: string) {
     return this.authService.getMe(id);
+  }
+
+  @Public()
+  @Post('verify-email/:code')
+  verifyEmail(@Body('email') dto: EmailDto, @Param('code') code: string) {
+    return this.authService.verifyUser(dto, code);
+  }
+
+  @Public()
+  @Post('send-code/:email')
+  sendCode(@Param('email') dto: EmailDto) {
+    return this.authService.sendCode(dto);
   }
 }

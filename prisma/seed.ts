@@ -1,6 +1,4 @@
-// import { PrismaClient, LimitType, Permission } from '';
-
-import { LimitType } from 'generated/prisma/client';
+import { LimitType, Permission } from 'generated/prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 const prisma = new PrismaService();
@@ -65,8 +63,8 @@ async function main() {
     update: {},
     create: {
       name: 'PRO',
-      description: 'Plan Pro',
-      price: 10,
+      description: 'Con todo lo que necesita tu negocio para crecer',
+      price: 5,
     },
   });
 
@@ -75,12 +73,12 @@ async function main() {
       {
         planId: proPlan.id,
         type: LimitType.PRODUCTS,
-        value: 200,
+        value: 500,
       },
       {
         planId: proPlan.id,
         type: LimitType.EMPLOYEES,
-        value: 5,
+        value: 10,
       },
       {
         planId: proPlan.id,
@@ -90,12 +88,12 @@ async function main() {
       {
         planId: proPlan.id,
         type: LimitType.IMAGES,
-        value: 250,
+        value: 1000,
       },
       {
         planId: proPlan.id,
         type: LimitType.SUPPLIERS,
-        value: 30,
+        value: 50,
       },
       {
         planId: proPlan.id,
@@ -109,6 +107,80 @@ async function main() {
       },
     ],
     skipDuplicates: true,
+  });
+
+  const proPlanPlus = await prisma.plan.upsert({
+    where: {
+      name: 'PRO+',
+    },
+    update: {},
+    create: {
+      name: 'PRO+',
+      description: 'Diseñado para llevar tu negocio al siguiente nivel',
+      price: 15,
+    },
+  });
+
+  await prisma.planLimit.createMany({
+    data: [
+      {
+        planId: proPlanPlus.id,
+        type: LimitType.PRODUCTS,
+        value: 2000,
+      },
+      {
+        planId: proPlanPlus.id,
+        type: LimitType.EMPLOYEES,
+        value: 100,
+      },
+      {
+        planId: proPlanPlus.id,
+        type: LimitType.MOVEMENTS,
+        value: 10000,
+      },
+      {
+        planId: proPlanPlus.id,
+        type: LimitType.IMAGES,
+        value: 1000,
+      },
+      {
+        planId: proPlanPlus.id,
+        type: LimitType.SUPPLIERS,
+        value: 1000,
+      },
+      {
+        planId: proPlanPlus.id,
+        type: LimitType.EXPENSES,
+        value: 2000,
+      },
+      {
+        planId: proPlanPlus.id,
+        type: LimitType.INVITATIONS,
+        value: 1000,
+      },
+    ],
+    skipDuplicates: true,
+  });
+  await prisma.planPermission.createMany({
+    data: [
+      {
+        planId: proPlanPlus.id,
+        permission: Permission.EXPORT_REPORTS_PDF,
+      },
+      {
+        planId: proPlanPlus.id,
+        permission: Permission.EXPORT_REPORTS_EXCEL,
+      },
+    ],
+    skipDuplicates: true,
+  });
+  await prisma.business.update({
+    where: {
+      id: 2,
+    },
+    data: {
+      planId: 3,
+    },
   });
 }
 

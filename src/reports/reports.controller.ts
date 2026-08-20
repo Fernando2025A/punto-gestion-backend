@@ -4,6 +4,8 @@ import {
   Param,
   ParseIntPipe,
   Query,
+  Res,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { ReportsService } from './reports.service';
@@ -13,6 +15,9 @@ import { PeriodDto } from './dto/period.dto';
 import { Permissions } from 'src/auth/decorators/permission.decorator';
 import { Permission } from 'generated/prisma/enums';
 import { PermissionsGuard } from 'src/auth/guards/permission.guard';
+import { ReportsExportService } from './reports-export.service';
+import { type Response } from 'express';
+import { SubscriptionsService } from 'src/suscriptions/subscriptions.service';
 
 @Permissions(Permission.VIEW_REPORTS)
 @UseGuards(PermissionsGuard)
@@ -21,6 +26,8 @@ export class ReportsController {
   constructor(
     private readonly reportsService: ReportsService,
     private readonly inventoryService: InventoryService,
+    private readonly exportService: ReportsExportService,
+    private readonly subscriptionsService: SubscriptionsService,
   ) {}
 
   @Get('low-stock')
@@ -78,5 +85,50 @@ export class ReportsController {
     @Query() periodDto: PeriodDto,
   ) {
     return this.reportsService.getBusinessResume(id, businessId, periodDto);
+  }
+
+  @Get('excel/:businessId')
+  async exportResumeExcel(
+    @Query() dto: PeriodDto,
+    @CurrentUser('id') userId: string,
+    @Param('businessId', ParseIntPipe) businessId: number,
+    @Res() res: Response,
+  ) {
+    await this.subscriptionsService.validatePermission(businessId, [
+      Permission.EXPORT_REPORTS_EXCEL,
+    ]);
+    const buffer = await this.reportsService.generateBusinessReportExcel(
+      businessId,
+      userId,
+      dto,
+    );
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', 'attachment; filename=resumen.xlsx');
+    res.send(buffer);
+  }
+
+  @Get('pdf/:businessId')
+  async descargarPdf(
+    @CurrentUser('id') userId: string,
+    @Param('businessId', ParseIntPipe) businessId: number,
+    @Query() dto: PeriodDto,
+  ): Promise<StreamableFile> {
+    await this.subscriptionsService.validatePermission(businessId, [
+      Permission.EXPORT_REPORTS_PDF,
+    ]);
+
+    const stream = await this.reportsService.generateBusinessReportPdf(
+      businessId,
+      userId,
+      dto,
+    );
+
+    return new StreamableFile(stream, {
+      type: 'application/pdf',
+    });
   }
 }

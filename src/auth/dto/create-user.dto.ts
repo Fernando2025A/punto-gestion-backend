@@ -16,3 +16,10 @@ export class CreateUserDto {
   @IsNotEmpty()
   password: string;
 }
+
+export class EmailDto {
+  @IsString()
+  @IsNotEmpty()
+  @IsEmail()
+  email: string;
+}

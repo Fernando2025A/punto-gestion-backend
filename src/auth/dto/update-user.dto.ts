@@ -12,4 +12,8 @@ export class UpdateUserDto extends PartialType(
   @IsString()
   @IsOptional()
   imageUrl?: string;
+
+  @IsString()
+  @IsOptional()
+  phoneNumber?: string;
 }

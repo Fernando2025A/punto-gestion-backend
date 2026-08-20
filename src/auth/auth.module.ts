@@ -9,11 +9,13 @@ import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GoogleStrategy } from './google.strategy';
 import { CloudinaryModule } from 'src/cloudinary/cloudinary.module';
+import { MailModule } from 'src/mail/mail.module';
 
 @Module({
   imports: [
     CloudinaryModule,
     PrismaModule,
+    MailModule,
     PassportModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET ?? 'dev-secret',
