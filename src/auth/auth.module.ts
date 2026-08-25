@@ -10,10 +10,12 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GoogleStrategy } from './google.strategy';
 import { CloudinaryModule } from 'src/cloudinary/cloudinary.module';
 import { MailModule } from 'src/mail/mail.module';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
   imports: [
     CloudinaryModule,
+    ConfigModule,
     PrismaModule,
     MailModule,
     PassportModule,

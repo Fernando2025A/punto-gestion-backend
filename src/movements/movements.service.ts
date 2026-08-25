@@ -236,6 +236,7 @@ export class MovementsService {
           imageUrl: dto.imageUrl,
           category: dto.category,
           supplierId: dto.supplierId,
+          expireAlertAt: dto.expireAlertAt,
           expirationDate: dto.expirationDate
             ? new Date(dto.expirationDate)
             : null,
@@ -605,38 +606,12 @@ export class MovementsService {
     return movements;
   }
 
-  async getLast7DaysMovementsSummary(userId: string, businessId: number) {
-    // 1. Validar acceso del usuario al negocio y obtener el inventoryId
-    const employee = await this.prisma.businessEmployee.findUnique({
-      where: {
-        userId_businessId: {
-          userId,
-          businessId,
-        },
-      },
-      select: {
-        isActive: true,
-        business: {
-          select: {
-            inventory: {
-              select: { id: true },
-            },
-          },
-        },
-      },
+  async getLast7DaysMovementsSummary(businessId: number) {
+    const inventory = await this.prisma.inventory.findFirst({
+      where: { business: { id: businessId } },
     });
 
-    if (!employee || !employee.isActive) {
-      throw new ForbiddenException('No tienes acceso a este negocio');
-    }
-
-    const inventoryId = employee.business.inventory?.id;
-
-    if (!inventoryId) {
-      throw new NotFoundException(
-        'No se encontró el inventario para este negocio',
-      );
-    }
+    if (!inventory) throw new NotFoundException('No se encontró inventario');
 
     // 2. Definir el rango de los últimos 7 días
     const endOfToday = new Date();
@@ -649,7 +624,7 @@ export class MovementsService {
     // 3. Consultar los movimientos dentro del rango
     const movements = await this.prisma.movementHistory.findMany({
       where: {
-        inventoryId,
+        inventoryId: inventory.id,
         createdAt: {
           gte: startOf7DaysAgo,
           lte: endOfToday,
@@ -701,7 +676,7 @@ export class MovementsService {
     }));
   }
 
-  async getStockEntry(userId: string, businessId: number, dto: FindStockDto) {
+  async getStockEntry(businessId: number, dto: FindStockDto) {
     const inventory = await this.prisma.inventory.findFirst({
       where: { business: { id: businessId } },
     });
@@ -714,7 +689,6 @@ export class MovementsService {
     const [movements, total] = await Promise.all([
       this.prisma.movementHistory.findMany({
         where: {
-          userId,
           inventoryId: inventory.id,
           type: 'STOCK_ENTRY',
         },
@@ -723,7 +697,7 @@ export class MovementsService {
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.movementHistory.count({
-        where: { userId, type: 'STOCK_ENTRY' },
+        where: { type: 'STOCK_ENTRY', inventoryId: inventory.id },
       }),
     ]);
 
@@ -738,7 +712,7 @@ export class MovementsService {
     };
   }
 
-  async getStockExit(userId: string, businessId: number, dto: FindStockDto) {
+  async getStockExit(businessId: number, dto: FindStockDto) {
     const inventory = await this.prisma.inventory.findFirst({
       where: { business: { id: businessId } },
     });
@@ -751,7 +725,7 @@ export class MovementsService {
     const [movements, total] = await Promise.all([
       this.prisma.movementHistory.findMany({
         where: {
-          userId,
+          inventoryId: inventory.id,
           type: 'STOCK_EXIT',
         },
         skip,
@@ -759,7 +733,7 @@ export class MovementsService {
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.movementHistory.count({
-        where: { userId, type: 'STOCK_EXIT' },
+        where: { inventoryId: inventory.id, type: 'STOCK_EXIT' },
       }),
     ]);
 
@@ -774,11 +748,7 @@ export class MovementsService {
     };
   }
 
-  async getMovements(
-    userId: string,
-    businessId: number,
-    dto: FindMovementsDto,
-  ) {
+  async getMovements(businessId: number, dto: FindMovementsDto) {
     const inventory = await this.prisma.inventory.findFirst({
       where: { business: { id: businessId } },
     });
@@ -788,7 +758,6 @@ export class MovementsService {
     const skip = (page - 1) * limit;
 
     const where = {
-      userId: userId,
       inventoryId: inventory.id,
       ...(movementType && { type: movementType }),
     };

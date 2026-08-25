@@ -42,6 +42,7 @@ export class ProductsService {
   }
 
   async create(dto: CreateProductDto, userId: string, businessId: number) {
+    console.log('Datos del producto: ', dto);
     await this.subscriptionsService.validate(businessId, LimitType.PRODUCTS, 1);
     const inventory = await this.prisma.inventory.findUnique({
       where: { businessId },
@@ -136,7 +137,7 @@ export class ProductsService {
     return this.movements.recordBulkStockEntry(dto, userId, inventory.id);
   }
 
-  async findAll(userId: string, dto: FindProductsDto, businessId: number) {
+  async findAll(dto: FindProductsDto, businessId: number) {
     const { page = 1, limit = 10, category, search } = dto;
     const inventory = await this.prisma.inventory.findUnique({
       where: { businessId },
@@ -185,7 +186,7 @@ export class ProductsService {
     };
   }
 
-  async findOne(userId: string, productName: string, businessId: number) {
+  async findOne(productName: string, businessId: number) {
     const inventory = await this.prisma.inventory.findUnique({
       where: { businessId },
       select: { id: true },
@@ -222,6 +223,7 @@ export class ProductsService {
     productId: number,
     businessId: number,
   ) {
+    console.log('Datos del producto: ', dto);
     const inventory = await this.prisma.inventory.findUnique({
       where: { businessId },
       select: { id: true },
@@ -231,7 +233,6 @@ export class ProductsService {
       throw new NotFoundException('El inventario de este negocio no existe');
     }
 
-    // 👈 AÑADIDO: Incluimos imageUrl en el select para saber si tenía imagen previa
     const existingProduct = await this.prisma.product.findFirst({
       where: {
         id: productId,
@@ -268,7 +269,6 @@ export class ProductsService {
       inventory.id,
     );
 
-    // 👈 AÑADIDO: Si se asignó una nueva imagen y existía una anterior, eliminamos la previa
     if (dto.imageUrl && previousImageUrl && dto.imageUrl !== previousImageUrl) {
       const publicId =
         this.cloudinaryService.extractPublicIdFromUrl(previousImageUrl);

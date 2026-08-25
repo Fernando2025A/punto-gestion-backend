@@ -37,6 +37,12 @@ export class CreateProductDto {
   @Type(() => Number)
   minimumStock?: number;
 
+  @IsOptional()
+  @IsNumber()
+  @Min(2)
+  @Type(() => Number)
+  expireAlertAt?: number;
+
   @IsEnum(Category)
   @IsNotEmpty()
   category: Category;

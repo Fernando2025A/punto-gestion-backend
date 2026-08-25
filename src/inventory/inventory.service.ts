@@ -1,8 +1,6 @@
-import {
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from 'generated/prisma/browser';
+import { PaginationDto } from 'src/business/business-employees/dto/pagination.dto';
 import { MovementsService } from 'src/movements/movements.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 
@@ -13,49 +11,23 @@ export class InventoryService {
     private readonly movements: MovementsService,
   ) {}
 
-  async getResume(userId: string, businessId: number) {
-    // 1. Obtener el inventario del negocio y validar que el usuario tenga acceso activo
-    const employee = await this.prisma.businessEmployee.findUnique({
-      where: {
-        userId_businessId: {
-          userId,
-          businessId,
-        },
-      },
-      select: {
-        isActive: true,
-        business: {
-          select: {
-            inventory: {
-              select: { id: true },
-            },
-          },
-        },
-      },
+  async getResume(businessId: number) {
+    const inventory = await this.prisma.inventory.findFirst({
+      where: { business: { id: businessId } },
     });
 
-    if (!employee || !employee.isActive) {
-      throw new ForbiddenException('No tienes acceso a este negocio');
-    }
-
-    const inventoryId = employee.business.inventory?.id;
-
-    if (!inventoryId) {
-      throw new NotFoundException(
-        'No se encontró el inventario para este negocio',
-      );
-    }
+    if (!inventory) throw new NotFoundException('No se encontró inventario');
 
     // 2. Métrica agregada (Total de productos y Stock total)
     const metrics = await this.prisma.product.aggregate({
-      where: { inventoryId },
+      where: { inventoryId: inventory.id },
       _count: { id: true },
       _sum: { stock: true },
     });
 
     // 3. Productos para calcular el valor monetario acumulado
     const products = await this.prisma.product.findMany({
-      where: { inventoryId },
+      where: { inventoryId: inventory.id },
       select: {
         price: true,
         stock: true,
@@ -69,7 +41,7 @@ export class InventoryService {
     }, 0);
 
     // 5. Movimientos del día filtrados por inventario
-    const todayMovements = await this.movements.getTodayMovements(inventoryId);
+    const todayMovements = await this.movements.getTodayMovements(inventory.id);
 
     return {
       totalProducts: metrics._count.id ?? 0,
@@ -79,112 +51,81 @@ export class InventoryService {
     };
   }
 
-  async getLowStock(userId: string, businessId: number) {
-    // 1. Obtener la alerta global del usuario y validar su acceso al negocio
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { stockAlertAt: true },
+  async getLowStock(
+    businessId: number,
+    dto: PaginationDto = { page: 1, limit: 12 },
+  ) {
+    const page = dto.page ? Number(dto.page) : 1;
+    const limit = dto.limit ? Number(dto.limit) : 12;
+    const skip = (page - 1) * limit;
+
+    const inventory = await this.prisma.inventory.findFirst({
+      where: { business: { id: businessId } },
     });
 
-    if (!user) {
-      throw new NotFoundException('Usuario no encontrado');
-    }
+    if (!inventory) throw new NotFoundException('No se encontró inventario');
 
-    const globalAlertLevel = user.stockAlertAt ?? 10;
-
-    // 2. Obtener el inventario del negocio
-    const employee = await this.prisma.businessEmployee.findUnique({
-      where: {
-        userId_businessId: {
-          userId,
-          businessId,
-        },
-      },
+    const business = await this.prisma.business.findFirst({
+      where: { id: businessId },
       select: {
-        isActive: true,
-        business: {
-          select: {
-            inventory: {
-              select: { id: true },
-            },
-          },
+        owner: {
+          select: { stockAlertAt: true },
         },
       },
     });
 
-    if (!employee || !employee.isActive) {
-      throw new ForbiddenException('No tienes acceso a este negocio');
-    }
+    const whereCondition: Prisma.ProductWhereInput = {
+      inventoryId: inventory.id,
+      stock: { gt: 0 }, // 👈 Garantiza que NO incluya productos agotados (stock 0)
+      OR: [
+        {
+          minimumStock: { not: null },
+          stock: { lte: this.prisma.product.fields.minimumStock },
+        },
+        {
+          minimumStock: null,
+          stock: { lte: business?.owner.stockAlertAt },
+        },
+      ],
+    };
 
-    const inventoryId = employee.business.inventory?.id;
+    const [data, totalItems] = await this.prisma.$transaction([
+      this.prisma.product.findMany({
+        where: whereCondition,
+        orderBy: { stock: 'asc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.product.count({
+        where: whereCondition,
+      }),
+    ]);
 
-    if (!inventoryId) {
-      throw new NotFoundException(
-        'No se encontró un inventario para este negocio',
-      );
-    }
+    const totalPages = Math.ceil(totalItems / limit);
 
-    // 3. Consultar productos con bajo stock directamente desde la base de datos
-    // Usamos OR para capturar tanto las alertas personalizadas como las globales
-    const lowStockProducts = await this.prisma.product.findMany({
-      where: {
-        inventoryId,
-        OR: [
-          // Caso A: El producto tiene un minimumStock personalizado y el stock actual es menor o igual
-          {
-            minimumStock: { not: null },
-            stock: { lte: this.prisma.product.fields.minimumStock }, // Comparación de columnas en Prisma
-          },
-          // Caso B: El producto no tiene minimumStock propio y se compara contra la alerta global del usuario
-          {
-            minimumStock: null,
-            stock: { lte: globalAlertLevel },
-          },
-        ],
+    return {
+      data,
+      meta: {
+        totalItems,
+        itemCount: data.length,
+        itemsPerPage: limit,
+        totalPages,
+        currentPage: page,
       },
-      orderBy: { stock: 'asc' },
-    });
-
-    return lowStockProducts;
+    };
   }
 
-  async getCategories(userId: string, businessId: number) {
-    // 1. Validar que el negocio exista y que el usuario tenga acceso a él
-    const employee = await this.prisma.businessEmployee.findUnique({
-      where: {
-        userId_businessId: {
-          userId,
-          businessId,
-        },
-      },
-      select: {
-        isActive: true,
-        business: {
-          select: {
-            inventory: {
-              select: { id: true },
-            },
-          },
-        },
-      },
+  async getCategories(businessId: number) {
+    const inventory = await this.prisma.inventory.findFirst({
+      where: { business: { id: businessId } },
     });
 
-    if (!employee || !employee.isActive) {
-      throw new ForbiddenException('No tienes acceso a este negocio');
-    }
-
-    const inventoryId = employee.business.inventory?.id;
-
-    if (!inventoryId) {
-      throw new NotFoundException(
-        'No se encontró un inventario para este negocio',
-      );
-    }
+    if (!inventory) throw new NotFoundException('No se encontró inventario');
 
     // 2. Agrupar productos por categoría
     const categories = await this.prisma.product.groupBy({
       by: ['category'],
-      where: { inventoryId },
+      where: { inventoryId: inventory.id },
       _count: { category: true },
     });
 
@@ -194,50 +135,50 @@ export class InventoryService {
     }));
   }
 
-  async getOutOfStock(userId: string, businessId: number) {
-    // 1. Validar acceso del usuario al negocio y obtener el inventoryId
-    const employee = await this.prisma.businessEmployee.findUnique({
-      where: {
-        userId_businessId: {
-          userId,
-          businessId,
-        },
-      },
-      select: {
-        isActive: true,
-        business: {
-          select: {
-            inventory: {
-              select: { id: true },
-            },
-          },
-        },
-      },
+  async getOutOfStock(
+    businessId: number,
+    dto: PaginationDto = { page: 1, limit: 12 },
+  ) {
+    const page = dto.page ? Number(dto.page) : 1;
+    const limit = dto.limit ? Number(dto.limit) : 12;
+    const skip = (page - 1) * limit;
+
+    const inventory = await this.prisma.inventory.findFirst({
+      where: { business: { id: businessId } },
     });
 
-    if (!employee || !employee.isActive) {
-      throw new ForbiddenException('No tienes acceso a este negocio');
-    }
+    if (!inventory) throw new NotFoundException('No se encontró inventario');
 
-    const inventoryId = employee.business.inventory?.id;
+    const whereCondition = {
+      inventoryId: inventory.id,
+      stock: 0,
+    };
 
-    if (!inventoryId) {
-      throw new NotFoundException(
-        'No se encontró el inventario para este negocio',
-      );
-    }
+    const [data, totalItems] = await this.prisma.$transaction([
+      this.prisma.product.findMany({
+        where: whereCondition,
+        orderBy: {
+          name: 'asc',
+        },
+        skip,
+        take: limit,
+      }),
+      this.prisma.product.count({
+        where: whereCondition,
+      }),
+    ]);
 
-    // 2. Obtener productos agotados (stock igual a 0)
-    const products = await this.prisma.product.findMany({
-      where: {
-        inventoryId,
-        stock: 0,
+    const totalPages = Math.ceil(totalItems / limit);
+
+    return {
+      data,
+      meta: {
+        totalItems,
+        itemCount: data.length,
+        itemsPerPage: limit,
+        totalPages,
+        currentPage: page,
       },
-      orderBy: {
-        name: 'asc',
-      },
-    });
-
-    return products;
+    };
   }
 }

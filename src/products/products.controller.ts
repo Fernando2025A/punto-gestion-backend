@@ -12,6 +12,15 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiConsumes,
+  ApiParam,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
@@ -27,6 +36,8 @@ import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
 import { BulkStockExitDto } from 'src/movements/dto/bulk-stock-exit.dto';
 import { BulkStockEntryDto } from 'src/movements/dto/bulk-stock-entry.dto';
 
+@ApiTags('Productos')
+@ApiBearerAuth()
 @UseGuards(PermissionsGuard)
 @Controller('products')
 export class ProductsController {
@@ -37,12 +48,24 @@ export class ProductsController {
 
   @Permissions(Permission.CREATE_PRODUCT)
   @Post()
-  @UseInterceptors(FileInterceptor('file')) // 👈 Intercepta la imagen enviada con la key 'file'
+  @ApiOperation({ summary: 'Crear un nuevo producto con imagen opcional' })
+  @ApiConsumes('multipart/form-data')
+  @ApiQuery({ name: 'businessId', type: Number, description: 'ID del negocio' })
+  @ApiResponse({ status: 201, description: 'Producto creado exitosamente.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Datos inválidos o límite de plan alcanzado.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'El inventario del negocio no existe.',
+  })
+  @UseInterceptors(FileInterceptor('file'))
   async create(
     @CurrentUser('id') id: string,
     @Body() dto: CreateProductDto,
     @Query('businessId', ParseIntPipe) businessId: number,
-    @UploadedFile() file?: Express.Multer.File, // 👈 Recibimos el archivo opcional
+    @UploadedFile() file?: Express.Multer.File,
   ) {
     if (file) {
       const uploadResult = await this.cloudinaryService.uploadFile(file);
@@ -54,17 +77,35 @@ export class ProductsController {
 
   @Permissions(Permission.VIEW_PRODUCT)
   @Get('business/:businessId')
+  @ApiOperation({ summary: 'Obtener listado paginado y filtrado de productos' })
+  @ApiParam({ name: 'businessId', type: Number, description: 'ID del negocio' })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de productos obtenida exitosamente.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'El inventario del negocio no existe.',
+  })
   findAll(
-    @CurrentUser('id') userId: string,
     @Param('businessId', ParseIntPipe) businessId: number,
     @Query() paginationDto: FindProductsDto,
   ) {
-    return this.productsService.findAll(userId, paginationDto, businessId);
+    return this.productsService.findAll(paginationDto, businessId);
   }
 
-  // 🟢 Entrada de stock (ej: PATCH /products/stock-entry)
   @Permissions(Permission.REGISTER_STOCK_ENTRY)
   @Patch('stock-entry')
+  @ApiOperation({ summary: 'Registrar una entrada de stock individual' })
+  @ApiQuery({ name: 'businessId', type: Number, description: 'ID del negocio' })
+  @ApiResponse({
+    status: 200,
+    description: 'Entrada de stock registrada exitosamente.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'El inventario del negocio no existe.',
+  })
   recordStockEntry(
     @CurrentUser('id') id: string,
     @Body() dto: StockEntryDto,
@@ -75,6 +116,18 @@ export class ProductsController {
 
   @Permissions(Permission.REGISTER_STOCK_ENTRY)
   @Patch('stock-entry/bulk/:businessId')
+  @ApiOperation({
+    summary: 'Registrar entradas de stock de forma masiva (Bulk)',
+  })
+  @ApiParam({ name: 'businessId', type: Number, description: 'ID del negocio' })
+  @ApiResponse({
+    status: 200,
+    description: 'Entradas de stock masivas registradas con éxito.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'El inventario del negocio no existe.',
+  })
   async recordBulkStockEntry(
     @Param('businessId', ParseIntPipe) businessId: number,
     @CurrentUser('id') userId: string,
@@ -83,9 +136,18 @@ export class ProductsController {
     return await this.productsService.bulkStockEntry(dto, userId, businessId);
   }
 
-  // 🔴 Salida de stock (ej: PATCH /products/stock-exit)
   @Permissions(Permission.REGISTER_STOCK_EXIT)
   @Patch('stock-exit')
+  @ApiOperation({ summary: 'Registrar una salida de stock individual' })
+  @ApiQuery({ name: 'businessId', type: Number, description: 'ID del negocio' })
+  @ApiResponse({
+    status: 200,
+    description: 'Salida de stock registrada exitosamente.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'El inventario del negocio no existe.',
+  })
   recordStockExit(
     @CurrentUser('id') id: string,
     @Body() dto: StockExitDto,
@@ -96,6 +158,18 @@ export class ProductsController {
 
   @Permissions(Permission.REGISTER_STOCK_EXIT)
   @Patch('stock-exit/bulk/:businessId')
+  @ApiOperation({
+    summary: 'Registrar salidas de stock de forma masiva (Bulk)',
+  })
+  @ApiParam({ name: 'businessId', type: Number, description: 'ID del negocio' })
+  @ApiResponse({
+    status: 200,
+    description: 'Salidas de stock masivas registradas con éxito.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'El inventario del negocio no existe.',
+  })
   async recordBulkStockExit(
     @Param('businessId', ParseIntPipe) businessId: number,
     @CurrentUser('id') userId: string,
@@ -106,6 +180,18 @@ export class ProductsController {
 
   @Permissions(Permission.DELETE_PRODUCT)
   @Delete(':id')
+  @ApiOperation({ summary: 'Eliminar un producto por su ID' })
+  @ApiParam({
+    name: 'id',
+    type: Number,
+    description: 'ID numérico del producto',
+  })
+  @ApiQuery({ name: 'businessId', type: Number, description: 'ID del negocio' })
+  @ApiResponse({ status: 200, description: 'Producto eliminado exitosamente.' })
+  @ApiResponse({
+    status: 404,
+    description: 'El producto o el inventario no existe.',
+  })
   delete(
     @CurrentUser('id') id: string,
     @Param('id', ParseIntPipe) productId: number,
@@ -116,24 +202,53 @@ export class ProductsController {
 
   @Permissions(Permission.VIEW_PRODUCT)
   @Get(':name')
+  @ApiOperation({
+    summary: 'Buscar un producto específico por su nombre exacto',
+  })
+  @ApiParam({ name: 'name', type: String, description: 'Nombre del producto' })
+  @ApiQuery({ name: 'businessId', type: Number, description: 'ID del negocio' })
+  @ApiResponse({ status: 200, description: 'Detalle del producto encontrado.' })
+  @ApiResponse({
+    status: 404,
+    description: 'El producto o el inventario no existe.',
+  })
   findOne(
-    @CurrentUser('id') id: string,
     @Param('name') productName: string,
     @Query('businessId', ParseIntPipe) businessId: number,
   ) {
-    return this.productsService.findOne(id, productName, businessId);
+    return this.productsService.findOne(productName, businessId);
   }
 
-  // ⚠️ Los endpoints con :id deben ir SIEMPRE al final de las rutas del mismo método HTTP
   @Permissions(Permission.UPDATE_PRODUCT)
   @Patch(':id')
-  @UseInterceptors(FileInterceptor('file')) // 👈 Intercepta la imagen enviada con la key 'file'
+  @ApiOperation({ summary: 'Actualizar los datos e imagen de un producto' })
+  @ApiConsumes('multipart/form-data')
+  @ApiParam({
+    name: 'id',
+    type: Number,
+    description: 'ID numérico del producto',
+  })
+  @ApiQuery({ name: 'businessId', type: Number, description: 'ID del negocio' })
+  @ApiResponse({
+    status: 200,
+    description: 'Producto actualizado exitosamente.',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Validación fallida (ej: categoría FOOD sin fecha de expiración).',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'El producto o el inventario no existe.',
+  })
+  @UseInterceptors(FileInterceptor('file'))
   async update(
     @CurrentUser('id') id: string,
     @Param('id', ParseIntPipe) productId: number,
     @Body() dto: UpdateProductDto,
     @Query('businessId', ParseIntPipe) businessId: number,
-    @UploadedFile() file?: Express.Multer.File, // 👈 Recibimos el archivo opcional
+    @UploadedFile() file?: Express.Multer.File,
   ) {
     if (file) {
       const uploadResult = await this.cloudinaryService.uploadFile(file);

@@ -9,88 +9,86 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ReportsService } from './reports.service';
-import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import { InventoryService } from 'src/inventory/inventory.service';
 import { PeriodDto } from './dto/period.dto';
 import { Permissions } from 'src/auth/decorators/permission.decorator';
 import { Permission } from 'generated/prisma/enums';
 import { PermissionsGuard } from 'src/auth/guards/permission.guard';
-import { ReportsExportService } from './reports-export.service';
 import { type Response } from 'express';
 import { SubscriptionsService } from 'src/suscriptions/subscriptions.service';
+import { PaginationDto } from 'src/business/business-employees/dto/pagination.dto';
 
-@Permissions(Permission.VIEW_REPORTS)
 @UseGuards(PermissionsGuard)
 @Controller('reports')
 export class ReportsController {
   constructor(
     private readonly reportsService: ReportsService,
     private readonly inventoryService: InventoryService,
-    private readonly exportService: ReportsExportService,
     private readonly subscriptionsService: SubscriptionsService,
   ) {}
 
-  @Get('low-stock')
+  @Get('low-stock/:businessId')
   getLowStock(
-    @CurrentUser('id') id: string,
-    @Query('businessId', ParseIntPipe) businessId: number,
+    @Param('businessId', ParseIntPipe) businessId: number,
+    @Query() dto: PaginationDto,
   ) {
-    return this.inventoryService.getLowStock(id, businessId);
+    return this.inventoryService.getLowStock(businessId, dto);
   }
 
-  @Get('out-stock')
+  @Permissions(Permission.VIEW_REPORTS)
+  @Get('out-stock/:businessId')
   getStockOut(
-    @CurrentUser('id') id: string,
-    @Query('businessId', ParseIntPipe) businessId: number,
+    @Param('businessId', ParseIntPipe) businessId: number,
+    @Query() dto: PaginationDto,
   ) {
-    return this.inventoryService.getOutOfStock(id, businessId);
+    return this.inventoryService.getOutOfStock(businessId, dto);
   }
 
-  @Get('low-rotation')
+  @Permissions(Permission.VIEW_REPORTS)
+  @Get('low-rotation/:businessId')
   getLowRotation(
-    @CurrentUser('id') id: string,
-    @Query('businessId', ParseIntPipe) businessId: number,
+    @Param('businessId', ParseIntPipe) businessId: number,
+    @Query() dto: PaginationDto,
   ) {
-    return this.reportsService.getLowRotationProducts(businessId, id);
+    return this.reportsService.getLowRotationProducts(businessId, 60, dto);
   }
 
+  @Permissions(Permission.VIEW_REPORTS)
   @Get('month')
   getCurrentMonthProfits(
-    @CurrentUser('id') id: string,
     @Query('businessId', ParseIntPipe) businessId: number,
   ) {
-    return this.reportsService.getCurrentMonthProfits(businessId, id);
+    return this.reportsService.getCurrentMonthProfits(businessId);
   }
 
-  @Get('expiring-soon')
+  @Permissions(Permission.VIEW_REPORTS)
+  @Get('expiring-soon/:businessId')
   getExpiringSoonProducts(
-    @CurrentUser('id') id: string,
-    @Query('businessId', ParseIntPipe) businessId: number,
+    @Param('businessId', ParseIntPipe) businessId: number,
+    @Query() dto: PaginationDto,
   ) {
-    return this.reportsService.getExpiringSoonProducts(businessId, id);
+    return this.reportsService.getExpiringSoonProducts(businessId, 30, dto);
   }
 
+  @Permissions(Permission.VIEW_REPORTS)
   @Get('resume')
-  getResume(
-    @CurrentUser('id') id: string,
-    @Query('businessId', ParseIntPipe) businessId: number,
-  ) {
-    return this.reportsService.getKPIOverview(businessId, id);
+  getResume(@Query('businessId', ParseIntPipe) businessId: number) {
+    return this.reportsService.getKPIOverview(businessId);
   }
 
+  @Permissions(Permission.VIEW_REPORTS)
   @Get('business-resume/:businessId')
   getBusinessResume(
-    @CurrentUser('id') id: string,
     @Param('businessId', ParseIntPipe) businessId: number,
     @Query() periodDto: PeriodDto,
   ) {
-    return this.reportsService.getBusinessResume(id, businessId, periodDto);
+    return this.reportsService.getBusinessResume(businessId, periodDto);
   }
 
+  @Permissions(Permission.EXPORT_REPORTS_EXCEL)
   @Get('excel/:businessId')
   async exportResumeExcel(
     @Query() dto: PeriodDto,
-    @CurrentUser('id') userId: string,
     @Param('businessId', ParseIntPipe) businessId: number,
     @Res() res: Response,
   ) {
@@ -99,7 +97,6 @@ export class ReportsController {
     ]);
     const buffer = await this.reportsService.generateBusinessReportExcel(
       businessId,
-      userId,
       dto,
     );
 
@@ -111,9 +108,9 @@ export class ReportsController {
     res.send(buffer);
   }
 
+  @Permissions(Permission.EXPORT_REPORTS_PDF)
   @Get('pdf/:businessId')
   async descargarPdf(
-    @CurrentUser('id') userId: string,
     @Param('businessId', ParseIntPipe) businessId: number,
     @Query() dto: PeriodDto,
   ): Promise<StreamableFile> {
@@ -123,7 +120,6 @@ export class ReportsController {
 
     const stream = await this.reportsService.generateBusinessReportPdf(
       businessId,
-      userId,
       dto,
     );
 

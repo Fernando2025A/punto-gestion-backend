@@ -19,18 +19,18 @@ export class UserCleanupCronService {
       const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
       const [deletedUsers, deletedCodes] = await Promise.all([
-        // 1. Eliminar usuarios temporales vencidos O no verificados con +24hs de antigüedad
+        // 1. Eliminar usuarios temporales vencidos con +24hs de antigüedad
         this.prisma.user.deleteMany({
           where: {
             OR: [
               // Cuentas temporales expiradas
               {
                 isTemporaly: true,
-                OR: [{ expiresAt: { lt: now } }, { expiresAt: null }],
+                OR: [{ expiresAt: { lt: now } }],
               },
               // Cuentas no verificadas creadas hace más de 24 horas
               {
-                emailVerified: false,
+                isTemporaly: true,
                 createdAt: { lt: twentyFourHoursAgo },
               },
             ],

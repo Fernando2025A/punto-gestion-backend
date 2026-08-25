@@ -15,20 +15,30 @@ import { PermissionsGuard } from 'src/auth/guards/permission.guard';
 import { Permission } from 'generated/prisma/enums';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { PaginationDto } from './dto/pagination.dto';
+import { PaginationFilterDto } from './dto/pagination-filter.dto';
+import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 
 @UseGuards(PermissionsGuard)
 @Controller('employees')
 export class BusinessEmployeesController {
   constructor(private readonly employeesService: BusinessEmployeesService) {}
 
-  // GET /employees?businessId=1
   @Get(':businessId')
   @Permissions(Permission.VIEW_EMPLOYEES)
-  findAll(
+  findAllFilter(
     @Param('businessId', ParseIntPipe) businessId: number,
-    @Query() dto: PaginationDto,
+    @Query() dto: PaginationFilterDto,
   ) {
-    return this.employeesService.findAll(businessId, dto);
+    const pagination: PaginationDto = {
+      limit: dto.limit,
+      page: dto.page,
+    };
+    return this.employeesService.findAll(
+      businessId,
+      pagination,
+      dto.role,
+      dto.isActive,
+    );
   }
 
   // PATCH /employees/1?businessId=1
@@ -37,9 +47,10 @@ export class BusinessEmployeesController {
   update(
     @Param('id', ParseIntPipe) employeeId: number,
     @Query('businessId', ParseIntPipe) businessId: number,
+    @CurrentUser('email') email: string,
     @Body() dto: UpdateEmployeeDto,
   ) {
-    return this.employeesService.update(employeeId, businessId, dto);
+    return this.employeesService.update(employeeId, businessId, dto, email);
   }
 
   // DELETE /employees/1?businessId=1
@@ -48,7 +59,8 @@ export class BusinessEmployeesController {
   remove(
     @Param('id', ParseIntPipe) employeeId: number,
     @Query('businessId', ParseIntPipe) businessId: number,
+    @CurrentUser('email') email: string,
   ) {
-    return this.employeesService.remove(employeeId, businessId);
+    return this.employeesService.remove(employeeId, businessId, email);
   }
 }

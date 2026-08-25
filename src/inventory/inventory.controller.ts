@@ -6,7 +6,6 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
-import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import { PermissionsGuard } from 'src/auth/guards/permission.guard';
 import { Permissions } from 'src/auth/decorators/permission.decorator';
 import { Permission } from 'generated/prisma/enums';
@@ -18,19 +17,13 @@ export class InventoryController {
 
   @Permissions(Permission.VIEW_DASHBOARD)
   @Get()
-  getResume(
-    @CurrentUser('id') id: string,
-    @Query('businessId', ParseIntPipe) businessId: number,
-  ) {
-    return this.inventoryService.getResume(id, businessId);
+  getResume(@Query('businessId', ParseIntPipe) businessId: number) {
+    return this.inventoryService.getResume(businessId);
   }
 
   @Permissions(Permission.VIEW_CATEGORIES)
   @Get('categories')
-  getCategories(
-    @CurrentUser('id') id: string,
-    @Query('businessId', ParseIntPipe) businessId: number,
-  ) {
-    return this.inventoryService.getCategories(id, businessId);
+  getCategories(@Query('businessId', ParseIntPipe) businessId: number) {
+    return this.inventoryService.getCategories(businessId);
   }
 }

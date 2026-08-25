@@ -18,6 +18,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { MailService } from 'src/mail/mail.service';
 import * as crypto from 'crypto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { SessionCodeDto } from './dto/session-code.dto';
 
 @Injectable()
 export class AuthService {
@@ -181,6 +182,10 @@ export class AuthService {
       }),
     ]);
 
+    if (user.email) {
+      await this.mailService.sendEmail(user.email);
+    }
+
     return {
       message: 'Cuenta verificada exitosamente',
     };
@@ -208,12 +213,91 @@ export class AuthService {
         expiresAt,
       },
     });
-
-    await this.mailService.sendEmail(dto.email);
     return {
       message: 'Código enviado correctamente',
     };
   }
+
+  async sendSessionCode(email: string) {
+    const user = await this.prisma.user.findUnique({
+      where: {
+        email,
+      },
+    });
+
+    if (!user) throw new NotFoundException('Usuario no registrado');
+
+    const code = this.generate6DigitCode();
+    const hashedCode = this.hashCode(code);
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    await this.prisma.verificationCode.create({
+      data: {
+        code: hashedCode,
+        userId: user.id,
+        expiresAt,
+      },
+    });
+    await this.mailService.sendSessionCode(email, code);
+    return {
+      message: 'Código de inicio de sesión enviado',
+    };
+  }
+
+  async verifySessionCode(dto: SessionCodeDto) {
+    // 1. Validar que el usuario exista
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Email no registrado');
+    }
+
+    if (!user.emailVerified) {
+      throw new BadRequestException('La cuenta no se encuentra verificada');
+    }
+
+    // 2. Obtener el código más reciente emitido para este usuario
+    const verificationCode = await this.prisma.verificationCode.findFirst({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!verificationCode) {
+      throw new BadRequestException(
+        'No se encontró un código de verificación activo',
+      );
+    }
+
+    // 3. Validar si el código ha expirado
+    if (verificationCode.expiresAt < new Date()) {
+      throw new BadRequestException(
+        'El código ha expirado. Solicita uno nuevo',
+      );
+    }
+
+    // 4. Comparar el hash del código ingresado con el de la base de datos
+    const hashedInputCode = this.hashCode(dto.code);
+    if (verificationCode.code !== hashedInputCode) {
+      throw new BadRequestException('El código ingresado es incorrecto');
+    }
+
+    // 5. Marcar usuario como verificado y limpiar los códigos usados en una transacción
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: { emailVerified: true },
+      }),
+      this.prisma.verificationCode.deleteMany({
+        where: { userId: user.id },
+      }),
+    ]);
+
+    return {
+      message: 'Cuenta verificada exitosamente',
+    };
+  }
+
   async validateUser(identifier: string, password: string) {
     const user = await this.prisma.user.findFirst({
       where: {
@@ -238,6 +322,7 @@ export class AuthService {
       email: user.email,
       activeBusinessId: user.activeBusinessId,
       emailVerified: user.emailVerified,
+      active2FA: user.active2FA,
       provider: user.provider,
     };
   }
@@ -375,7 +460,7 @@ export class AuthService {
         isTemporaly: user.isTemporaly,
         expiresAt: user.expiresAt,
       },
-      businesses: userBusinesses, // 👈 Ahora el frontend sabe a qué negocios tiene acceso el usuario
+      businesses: userBusinesses,
     };
   }
 
@@ -542,8 +627,10 @@ export class AuthService {
             username,
             email,
             activeBusinessId: 1,
+            emailVerified: true,
             password: hashedPassword,
             isTemporaly: true,
+            active2FA: false,
             expiresAt,
           },
         });
@@ -592,7 +679,10 @@ export class AuthService {
         id: true,
         username: true,
         email: true,
+        phoneNumber: true,
+        imageUrl: true,
         emailVerified: true,
+        active2FA: true,
         provider: true,
         activeBusinessId: true,
         ownedBusinesses: {

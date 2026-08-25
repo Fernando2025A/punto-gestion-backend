@@ -1,6 +1,7 @@
 import { PartialType, OmitType } from '@nestjs/mapped-types';
 import { CreateUserDto } from './create-user.dto';
-import { IsInt, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class UpdateUserDto extends PartialType(
   OmitType(CreateUserDto, ['email', 'password'] as const),
@@ -16,4 +17,13 @@ export class UpdateUserDto extends PartialType(
   @IsString()
   @IsOptional()
   phoneNumber?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return undefined;
+  })
+  @IsBoolean()
+  active2FA?: boolean;
 }

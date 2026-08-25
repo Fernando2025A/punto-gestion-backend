@@ -3,15 +3,15 @@ import { IsString, IsOptional, MaxLength, IsUrl } from 'class-validator';
 export class UpdateBusinessDto {
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxLength(20)
   name?: string;
 
   @IsOptional()
   @IsString()
-  @MaxLength(255)
+  @MaxLength(40)
   description?: string;
 
   @IsOptional()
-  @IsUrl() // 👈 Valida que sea una URL válida
+  @IsUrl()
   imageUrl?: string;
 }

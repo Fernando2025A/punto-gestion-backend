@@ -70,4 +70,41 @@ export class AdminService {
       throw error;
     }
   }
+
+  async getBusinessInfo(page = 1, limit = 10, businessId?: number) {
+    const skip = (page - 1) * limit;
+
+    // Condición de búsqueda dinámica
+    const where = businessId ? { id: businessId } : {};
+
+    // Ejecutamos ambas consultas en una sola transacción para optimizar la base de datos
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.business.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          businessUsage: true,
+          owner: true,
+          plan: true,
+        },
+        orderBy: { id: 'desc' }, // Mantiene un orden consistente al paginar
+      }),
+      this.prisma.business.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit) || 1;
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    };
+  }
 }

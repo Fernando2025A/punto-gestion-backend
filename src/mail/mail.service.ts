@@ -101,4 +101,33 @@ export class MailService {
     `,
     });
   }
+
+  async sendSessionCode(to: string, code: string) {
+    return this.resend.emails.send({
+      from: process.env.EMAIL_FROM!,
+      to,
+      subject: 'Código de verificación - Punto Gestión',
+      html: `
+      <h1>Completar inicio de sesión</h1>
+
+      <p>
+        Estás intentando iniciar sesión en <strong>Punto Gestión</strong>.
+      </p>
+
+      <p>
+        Tu código de verificación es:
+        <strong>${code}</strong>
+      </p>
+
+      <p>
+        Este código vencerá en <strong>5 minutos</strong>.
+      </p>
+
+      <p>
+        Si no has intentado iniciar sesión, puedes ignorar este correo.
+        Tu cuenta permanecerá protegida mientras no compartas este código.
+      </p>
+    `,
+    });
+  }
 }

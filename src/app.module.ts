@@ -17,6 +17,7 @@ import { AlertsModule } from './alerts/alerts.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { SuscriptionsModule } from './suscriptions/subscriptions.module';
 import { AdminModule } from './admin/admin.module';
+import { UserCleanupCronService } from './auth/user-cleanup.cron';
 
 @Module({
   imports: [
@@ -39,5 +40,6 @@ import { AdminModule } from './admin/admin.module';
     SuscriptionsModule,
     AdminModule,
   ],
+  providers: [UserCleanupCronService],
 })
 export class AppModule {}

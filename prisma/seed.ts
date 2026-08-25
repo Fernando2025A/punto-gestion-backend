@@ -174,14 +174,6 @@ async function main() {
     ],
     skipDuplicates: true,
   });
-  await prisma.business.update({
-    where: {
-      id: 2,
-    },
-    data: {
-      planId: 3,
-    },
-  });
 }
 
 main()

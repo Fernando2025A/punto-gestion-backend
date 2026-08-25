@@ -7,66 +7,47 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { MovementsService } from './movements.service';
-import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import { FindMovementsDto } from './dto/find-movements.dto';
 import { FindStockDto } from './dto/find-stock.dto';
 import { PermissionsGuard } from 'src/auth/guards/permission.guard';
 import { Permissions } from 'src/auth/decorators/permission.decorator';
 import { Permission } from 'generated/prisma/enums';
 
-@Controller('movements')
 @UseGuards(PermissionsGuard)
-@Permissions(Permission.VIEW_MOVEMENTS)
+@Controller('movements')
 export class MovementsController {
   constructor(private readonly movementsService: MovementsService) {}
 
+  @Permissions(Permission.VIEW_DASHBOARD)
   @Get('last7days')
-  getLast7DaysMov(
-    @CurrentUser('id') userId: string,
-    @Query('businessId', ParseIntPipe) businessId: number,
-  ) {
-    return this.movementsService.getLast7DaysMovementsSummary(
-      userId,
-      businessId,
-    );
+  getLast7DaysMov(@Query('businessId', ParseIntPipe) businessId: number) {
+    return this.movementsService.getLast7DaysMovementsSummary(businessId);
   }
 
+  @Permissions(Permission.VIEW_MOVEMENTS)
   @Get('stock-entry/:businessId')
   getStockEntry(
-    @CurrentUser('id') userId: string,
     @Query() paginationDto: FindStockDto,
     @Param('businessId', ParseIntPipe) businessId: number,
   ) {
-    return this.movementsService.getStockEntry(
-      userId,
-      businessId,
-      paginationDto,
-    );
+    return this.movementsService.getStockEntry(businessId, paginationDto);
   }
 
+  @Permissions(Permission.VIEW_MOVEMENTS)
   @Get('stock-exit/:businessId')
   getStockExit(
-    @CurrentUser('id') userId: string,
     @Query() paginationDto: FindStockDto,
     @Param('businessId', ParseIntPipe) businessId: number,
   ) {
-    return this.movementsService.getStockExit(
-      userId,
-      businessId,
-      paginationDto,
-    );
+    return this.movementsService.getStockExit(businessId, paginationDto);
   }
 
+  @Permissions(Permission.VIEW_MOVEMENTS)
   @Get(':businessId')
   getMovements(
-    @CurrentUser('id') userId: string,
     @Param('businessId', ParseIntPipe) businessId: number,
     @Query() paginationDto: FindMovementsDto,
   ) {
-    return this.movementsService.getMovements(
-      userId,
-      businessId,
-      paginationDto,
-    );
+    return this.movementsService.getMovements(businessId, paginationDto);
   }
 }

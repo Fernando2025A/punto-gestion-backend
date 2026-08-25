@@ -1,78 +1,145 @@
-import { Injectable } from '@nestjs/common';
-import { Permission, SaleStatus } from 'generated/prisma/enums';
-import { BusinessAccessService } from 'src/business/business-access/business-access.service';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { SaleStatus } from 'generated/prisma/enums';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { PeriodDto } from './dto/period.dto';
 import { ReportsExportService } from './reports-export.service';
 import { PdfProps } from './reports-export.service';
-import { SubscriptionsService } from 'src/suscriptions/subscriptions.service';
+import { PaginationDto } from 'src/business/business-employees/dto/pagination.dto';
+import { Prisma } from 'generated/prisma/browser';
 
 @Injectable()
 export class ReportsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly businessAccess: BusinessAccessService,
     private readonly reportsExportService: ReportsExportService,
-    private readonly subscriptionsService: SubscriptionsService,
   ) {}
   async getExpiringSoonProducts(
     businessId: number,
-    userId: string,
     daysAhead = 30,
+    dto: PaginationDto = { page: 1, limit: 12 },
   ) {
-    const inventory = await this.businessAccess.getInventory(
-      businessId,
-      userId,
-    );
+    const page = dto.page ? Number(dto.page) : 1;
+    const limit = dto.limit ? Number(dto.limit) : 12;
+    const skip = (page - 1) * limit;
+
+    const inventory = await this.prisma.inventory.findFirst({
+      where: { business: { id: businessId } },
+    });
+
+    if (!inventory) throw new NotFoundException('No se encontró inventario');
 
     const now = new Date();
     const futureDate = new Date();
     futureDate.setDate(now.getDate() + daysAhead);
 
-    return this.prisma.product.findMany({
-      where: {
-        inventoryId: inventory.id,
-        expirationDate: {
-          gte: now,
-          lte: futureDate,
+    const whereCondition = {
+      inventoryId: inventory.id,
+      expirationDate: {
+        gte: now,
+        lte: futureDate,
+      },
+    };
+
+    const [data, totalItems] = await this.prisma.$transaction([
+      this.prisma.product.findMany({
+        where: whereCondition,
+        orderBy: {
+          expirationDate: 'asc',
         },
+        skip,
+        take: limit,
+      }),
+      this.prisma.product.count({
+        where: whereCondition,
+      }),
+    ]);
+
+    const totalPages = Math.ceil(totalItems / limit);
+
+    return {
+      data,
+      meta: {
+        totalItems,
+        itemCount: data.length,
+        itemsPerPage: limit,
+        totalPages,
+        currentPage: page,
       },
-      orderBy: {
-        expirationDate: 'asc',
-      },
-    });
+    };
   }
 
   // 4. Productos con Poca Rotación (Sin ventas en los últimos 60 días)
-  async getLowRotationProducts(businessId: number, userId: string, days = 60) {
-    const inventory = await this.businessAccess.getInventory(
-      businessId,
-      userId,
-    );
+  async getLowRotationProducts(
+    businessId: number,
+    days = 60,
+    dto: PaginationDto = { page: 1, limit: 12 },
+  ) {
+    const page = dto.page ? Number(dto.page) : 1;
+    const limit = dto.limit ? Number(dto.limit) : 12;
+    const skip = (page - 1) * limit;
 
-    const sixtyDaysAgo = new Date();
-    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - days);
+    const inventory = await this.prisma.inventory.findFirst({
+      where: { business: { id: businessId } },
+    });
 
-    return this.prisma.product.findMany({
-      where: {
-        inventoryId: inventory.id,
-        saleItems: {
-          none: {
-            sale: {
-              businessId,
-              occurredAt: { gte: sixtyDaysAgo },
-              status: 'COMPLETED',
-            },
+    if (!inventory) throw new NotFoundException('No se encontró inventario');
+
+    const cutOffDate = new Date();
+    cutOffDate.setDate(cutOffDate.getDate() - days);
+
+    const whereCondition: Prisma.ProductWhereInput = {
+      inventoryId: inventory.id,
+      // 1. Solo evaluamos productos que tengan al menos X días de creados
+      createdAt: { lte: cutOffDate },
+      // 2. Filtramos productos que NO tengan ningún SaleItem asociado a una venta realizada en ese período
+      saleItems: {
+        none: {
+          sale: {
+            businessId,
+            occurredAt: { gte: cutOffDate },
+            status: 'COMPLETED',
           },
         },
       },
-    });
+    };
+
+    const [data, totalItems] = await this.prisma.$transaction([
+      this.prisma.product.findMany({
+        where: whereCondition,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.product.count({
+        where: whereCondition,
+      }),
+    ]);
+
+    const totalPages = Math.ceil(totalItems / limit);
+
+    return {
+      data,
+      meta: {
+        totalItems,
+        itemCount: data.length,
+        itemsPerPage: limit,
+        totalPages,
+        currentPage: page,
+      },
+    };
   }
 
   // 5. Ganancias del Mes Actual
-  async getCurrentMonthProfits(businessId: number, userId: string) {
-    // Valida acceso a través de BusinessAccessService
-    await this.businessAccess.getInventory(businessId, userId);
+  async getCurrentMonthProfits(businessId: number) {
+    const inventory = await this.prisma.inventory.findFirst({
+      where: { business: { id: businessId } },
+    });
+
+    if (!inventory) throw new NotFoundException('No se encontró inventario');
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -125,9 +192,12 @@ export class ReportsService {
     };
   }
 
-  async getBusinessResume(userId: string, businessId: number, dto: PeriodDto) {
-    // 1. Validar acceso del usuario al negocio
-    await this.businessAccess.getInventory(businessId, userId);
+  async getBusinessResume(businessId: number, dto: PeriodDto) {
+    const inventory = await this.prisma.inventory.findFirst({
+      where: { business: { id: businessId } },
+    });
+
+    if (!inventory) throw new NotFoundException('No se encontró inventario');
 
     const { startDate, endDate } = dto;
 
@@ -276,12 +346,12 @@ export class ReportsService {
     };
   }
 
-  async getKPIOverview(businessId: number, userId: string) {
-    // 1. Validar permisos
-    const inventory = await this.businessAccess.getInventory(
-      businessId,
-      userId,
-    );
+  async getKPIOverview(businessId: number) {
+    const inventory = await this.prisma.inventory.findFirst({
+      where: { business: { id: businessId } },
+    });
+
+    if (!inventory) throw new NotFoundException('No se encontró inventario');
 
     // Fechas de control
     const now = new Date();
@@ -349,12 +419,15 @@ export class ReportsService {
       this.prisma.product.count({
         where: {
           inventoryId: inventory.id,
+          // 1. Filtrar solo productos creados hace 'days' días o más
+          createdAt: { lte: sixtyDaysAgo },
+          // 2. Filtrar productos que NO se hayan vendido en ese período
           saleItems: {
             none: {
               sale: {
                 businessId,
                 occurredAt: { gte: sixtyDaysAgo },
-                status: SaleStatus.COMPLETED,
+                status: 'COMPLETED',
               },
             },
           },
@@ -424,9 +497,15 @@ export class ReportsService {
 
   async generateBusinessReportPdf(
     businessId: number,
-    userId: string,
     periodDto?: PeriodDto,
   ): Promise<PDFKit.PDFDocument> {
+    if (periodDto) {
+      if (periodDto?.endDate < periodDto?.startDate) {
+        throw new BadRequestException(
+          'La fecha de fin no puede ser menor a la de inicio',
+        );
+      }
+    }
     const now = new Date();
     const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const defaultEnd = new Date(
@@ -450,8 +529,8 @@ export class ReportsService {
       this.prisma.business.findUnique({
         where: { id: businessId },
       }),
-      this.getKPIOverview(businessId, userId),
-      this.getBusinessResume(userId, businessId, period),
+      this.getKPIOverview(businessId),
+      this.getBusinessResume(businessId, period),
     ]);
 
     const formatDate = (date: Date | string) => {
@@ -486,9 +565,15 @@ export class ReportsService {
 
   async generateBusinessReportExcel(
     businessId: number,
-    userId: string,
     periodDto?: PeriodDto,
   ): Promise<Buffer> {
+    if (periodDto) {
+      if (periodDto?.endDate < periodDto?.startDate) {
+        throw new BadRequestException(
+          'La fecha de fin no puede ser menor a la de inicio',
+        );
+      }
+    }
     const now = new Date();
     const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const defaultEnd = new Date(
@@ -511,8 +596,8 @@ export class ReportsService {
       this.prisma.business.findUnique({
         where: { id: businessId },
       }),
-      this.getKPIOverview(businessId, userId),
-      this.getBusinessResume(userId, businessId, period),
+      this.getKPIOverview(businessId),
+      this.getBusinessResume(businessId, period),
     ]);
 
     const formatDate = (date: Date | string) => {

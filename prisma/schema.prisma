@@ -22,6 +22,8 @@ model User {
 
   imageUrl        String?
 
+  active2FA       Boolean           @default(true)
+
   isTemporaly     Boolean           @default(false)
   expiresAt       DateTime?
 
