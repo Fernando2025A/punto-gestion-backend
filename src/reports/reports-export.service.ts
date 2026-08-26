@@ -32,12 +32,14 @@ export interface PdfProps {
 
 @Injectable()
 export class ReportsExportService {
+  private readonly fontsPath = path.join(process.cwd(), 'dist', 'fonts');
+
   private readonly fonts = {
     Roboto: {
-      normal: path.join(__dirname, 'fonts/Roboto-Regular.ttf'),
-      bold: path.join(__dirname, 'fonts/Roboto-Medium.ttf'),
-      italics: path.join(__dirname, 'fonts/Roboto-Italic.ttf'),
-      bolditalics: path.join(__dirname, 'fonts/Roboto-MediumItalic.ttf'),
+      normal: path.join(this.fontsPath, 'Roboto-Regular.ttf'),
+      bold: path.join(this.fontsPath, 'Roboto-Medium.ttf'),
+      italics: path.join(this.fontsPath, 'Roboto-Italic.ttf'),
+      bolditalics: path.join(this.fontsPath, 'Roboto-MediumItalic.ttf'),
     },
   };
 

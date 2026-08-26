@@ -6,17 +6,19 @@
     "deleteOutDir": true,
     "assets": [
       {
-        "include": "reports/fonts/**/*",
-        "outDir": "dist/src/reports/fonts"
+        "include": "../fonts/**/*",
+        "outDir": "dist/fonts"
       }
     ],
     "watchAssets": true,
-    "plugins": [{
+    "plugins": [
+      {
         "name": "@nestjs/swagger",
         "options": {
           "classValidatorShim": true,
           "introspectComments": true
         }
-      }]
+      }
+    ]
   }
 }
