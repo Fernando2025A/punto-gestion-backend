@@ -18,9 +18,17 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { SuscriptionsModule } from './suscriptions/subscriptions.module';
 import { AdminModule } from './admin/admin.module';
 import { UserCleanupCronService } from './auth/user-cleanup.cron';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 
 @Module({
   imports: [
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000, // Límite global por defecto (1 minuto)
+        limit: 100,
+      },
+    ]),
     EventEmitterModule.forRoot(),
     AlertsModule,
     PrismaModule,
@@ -40,6 +48,12 @@ import { UserCleanupCronService } from './auth/user-cleanup.cron';
     SuscriptionsModule,
     AdminModule,
   ],
-  providers: [UserCleanupCronService],
+  providers: [
+    UserCleanupCronService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}

@@ -25,6 +25,7 @@ import {
   ApiBody,
   ApiParam,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { CreateUserDto, EmailDto } from './dto/create-user.dto';
 import { Public } from './decorators/public.decorator';
@@ -334,6 +335,7 @@ export class AuthController {
     return this.authService.update(id, dto);
   }
 
+  @Throttle({ default: { limit: 1, ttl: 86400000 } })
   @Public()
   @Post('demo')
   @ApiOperation({

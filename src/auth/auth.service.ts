@@ -566,6 +566,8 @@ export class AuthService {
           },
         });
 
+        if (newUser.email) await this.mailService.sendEmail(newUser.email);
+
         return newUser;
       });
     }
