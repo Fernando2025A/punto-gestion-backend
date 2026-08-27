@@ -27,11 +27,11 @@
 - **Framework:** [NestJS](https://nestjs.com/) (Node.js)
 - **ORM:** [Prisma](https://www.prisma.io/)
 - **Database:** PostgreSQL
-- **Authentication:** JWT, AuthProviders (Local / Google OAuth)
+- **Authentication:** JWT, session Cookies, AuthProviders (Local / Google OAuth)
 - **Language:** TypeScript
 
 ### Frontend
-- **Framework:** Next.js / React
+- **Library:** React
 - **Styling:** Tailwind CSS / UI Components
 - **Data Visualization:** Recharts / Chart.js
 
@@ -44,18 +44,6 @@
 - **`Sale` / `SaleItem`:** Transactional records storing historical price/cost snapshots for accurate profit margin analysis.
 - **`Expense` / `Purchase`:** Operational expenditure and supplier purchase tracking.
 - **`MovementHistory`:** Comprehensive log for stock entries, exits, adjustments, and inventory activity.
-
----
-
-## 📡 Reports API Endpoints (`/reports`)
-
-| Method | Endpoint | Description | Required Permission |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/reports/low-stock` | Products at or below their reorder threshold | `VIEW_REPORTS` |
-| `GET` | `/reports/out-of-stock` | Products with zero available stock | `VIEW_REPORTS` |
-| `GET` | `/reports/expiring-soon` | Products nearing their expiration date | `VIEW_REPORTS` |
-| `GET` | `/reports/low-rotation` | Products with no sales/exits in the last 60 days | `VIEW_REPORTS` |
-| `GET` | `/reports/monthly-profits` | Financial summary (Revenue - COGS - Expenses = Net Profit) | `VIEW_FINANCIAL_SUMMARY` |
 
 ---
 
